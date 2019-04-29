@@ -101,6 +101,9 @@ Advanced LSH options:
     val threshold_per = threshold/100f
     
     val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
+    val suggestedRadius = options("radius_start").asInstanceOf[Double]
+    val keyLength=5
+    val numTables=250//00
     
                  
     //println("Using "+method+" to compute "+numNeighbors+"NN graph for dataset "+justFileName)
@@ -109,137 +112,111 @@ Advanced LSH options:
     //Set up Spark Context
     val sc=sparkContextSingleton.getInstance()
     println(s"Default parallelism: ${sc.defaultParallelism}")
+    println(s"Arguments:\n\tDataset:$datasetFile\n\tKL:$keyLength\n\tR0:$suggestedRadius\n\tNT:$numTables\n\tThreshold:$threshold_per")
+    
     //Stop annoying INFO messages
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
     //Load data from file
-    val dataRDD: RDD[(Long,LabeledPoint)] = MLUtils.loadLibSVMFile(sc, datasetFile).zipWithIndex().map(_.swap)
+    val dataRDD: RDD[(Long,LabeledPoint)] = MLUtils.loadLibSVMFile(sc, datasetFile)
+                                              .zipWithIndex()
+                                              .map(_.swap)
                                               .partitionBy(new HashPartitioner(numPartitions))
 
     
-    var iAnomalyVal = 1
-    var data_count = dataRDD.count()
-    val data = dataRDD.filter({case (point, isAnomaly) => isAnomaly.label!=iAnomalyVal || (math.random<0.6)  })
+    val ANOMALY_VALUE = 1
+    //TODO - Retain only 60% of anomalies - WHY?
+    val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.6)  })
+    trainingDataRDD.cache()
     
-    println("dataRDD: "+dataRDD.first())
-    data.cache()
-    var anomaliesRDD=data.filter({case (point, isAnomaly) => isAnomaly.label==iAnomalyVal})
-    println("anomaliesRDD Count: "+anomaliesRDD.count( ) )
+    val numAnomalies=trainingDataRDD.map({case (id, point) => if (point.label==ANOMALY_VALUE) 1 else 0}).sum.toInt
+    println(s"Number of elements: ${trainingDataRDD.count()} ($numAnomalies anomalies)")
     
-    println("data Count: "+data.count() )
-    
-    
-                                          
-//    val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, 200) //Make constant size buckets
-
-    ///////////////////////// USE Quick Parameterss
-////    val nComps = 300
-    val suggestedRadius = options("radius_start").asInstanceOf[Double]
-    val keyLength=5
-    val numTables=25000
+    //Get a new hasher
+    //Autoconfig
+    //val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, 200) //Make constant size buckets
+    //Quick Parameters
     val hasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, keyLength, numTables)
-    ///////////////////////////////////////////
     
-    //val primElem = data.first()
-    //val dataAll = data.take(5)
-    //println("data first: "+data.first())
-    //println("primElem._2: "+primElem._2)
-   // println("primElem._1: "+primElem._1)
-//    println(hasher.getHashes(primElem._2.features, primElem._1, suggestedRadius))
-    //hasher.getHashes(primElem._2.features, primElem._1, suggestedRadius)
-    //println("Size: "+hasherPoints.size)
-     //println(" hasher.dim: "+hasher.dim+" hasherkLength: " + hasher.keyLength +" hasher.ntables: "+hasher.numTables +", ncomps: "+nComps+ ",sugestedRadius: "+suggestedRadius) 
-    
-    val hashNeighbors = EuclideanLSHasherForAnomaly.getHashNeighbors(data, hasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
-    //println("hashNeighbors: "+hashNeighbors.collect)
-    
-    if(hashNeighbors!=null)
+    println("Training...")
+    val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, hasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
+    if(hashNeighborsRDD!=null)
     {
-      var pointsPerHash = hashNeighbors.flatMap({case l => l.map({case x => (x, l.size-1)})}).reduceByKey(_ + _).sortBy(_._2)
-      //.partitionBy(new HashPartitioner(numPartitions))
+      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
+                                                    .reduceByKey(_ + _)
+                                                    //.sortBy(_._2) //No need to sort the entire RDD here
+                                                    //.partitionBy(new HashPartitioner(numPartitions))
       
-      var maxNeighbors = pointsPerHash.map({case (id,rec) => (rec,id) }).max()._1.toFloat
-      var totalRows = pointsPerHash.count().toInt
-      //var numElementsAnomalies = math.ceil(totalRows*threshold_per).toInt // Use the threshold parameter
-      var numElementsAnomalies = anomaliesRDD.count().toInt
-      
-      //var numElemNormal = (totalRows-numElementsAnomalies).toInt
-      //var rddAnomalies = pointsPerHash.map({case (x,y) => (x,1.0)})
-      //var rddAnomalies = sc.parallelize(pointsPerHash.take(numElementsAnomalies),numPartitions)//map({case (x,y) => (x,1.0)})
-      //var rddNormal = pointsPerHash.take(numElemNormal).map({case (x,y) => (x,0.0)})
-      //var rddFinal = pointsPerHash.leftOuterJoin(rddAnomalies).map({case (id,(rec,anomaly)) => (id,anomaly.isDefined) })
-      
-      val mapAnomalies = pointsPerHash.take(numElementsAnomalies).toMap
-      val bMapAnomalies = sc.broadcast(mapAnomalies)
-      val rddFinal = pointsPerHash.map({case (id,rec) => (id,bMapAnomalies.value.contains(id)) })
-      println("anomalias detetadas: "+rddFinal.map({case (id, isanomaly) => if(isanomaly) 1 else 0 }).sum())
-      //var rddFinal = pointsPerHash.leftOuterJoin(rddAnomalies).map({case (id,(rec,anomaly)) => (id,anomaly.isDefined) })
-      
+      val maxNeighbors = numNeighborsPerPointRDD.map({case (id,rec) => rec }).max()
+      //DEBUG
+      val minNeighbors = numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()
 
-      var pointsPerHashPerc = pointsPerHash.map({case (id,rec) => (id, (1-(rec/maxNeighbors)).toDouble) })
-
-      var label = data.map({ case (h, n) => (h, n.label==iAnomalyVal) })
-      var rddPredLabel2 = rddFinal.join(label).map({case (id, (pred, label)) => 
-                                               (if(pred) 1.toDouble else 0.toDouble, if(label) 1.toDouble else 0.toDouble) })
-      var rddPredLabel = pointsPerHashPerc.join(label).map({case (id, (pred, label)) => (pred, if(label) 1.toDouble else 0.toDouble) })
-      pointsPerHashPerc.take(100).foreach(println)                                         
-      println("threshold_per "+totalRows*threshold_per)
-      println("label count "+label.count())
-      println("rddFinal count "+rddFinal.count())
-      var confMat =  rddFinal.join(label).map({case (id,(pred,label)) => 
-                                              var vp=if(label && pred) 1 else 0
-                                              var vn=if(!label && !pred) 1 else 0
-                                              var fp=if(!label && pred) 1 else 0
-                                              var fn=if(label && !pred) 1 else 0 
-                                              (vp,vn,fp,fn) })
-                                              .reduce({case ((tp1,tn1,fp1,fn1), (tp2,tn2,fp2,fn2)) => (tp1+tp2, tn1+tn2, fp1+fp2, fn1+fn2)   })
-      var tp =confMat._1.toFloat
-      var tn =confMat._2.toFloat
-      var fp =confMat._3.toFloat
-      var fn =confMat._4.toFloat
       
-      var accuracy = (tp+tn)/(tp+tn+fp+fn)
-      var precision = (tp)/(tp+fp)
-      var recall = (tp)/(tp+fn)
-      var f1score = 2*((precision*recall)/(precision+recall))
-      var metrics = new BinaryClassificationMetrics(rddPredLabel)// Donde DATA_RDD es de (Estimator:Double, Double)
-      var metrics2 = new BinaryClassificationMetrics(rddPredLabel2)// Donde DATA_RDD es de (Estimator:Double, Double)
+      //Retrieve the N=numAnomalies elements with fewer neighbors. They will constitute the predicted anomalies. The largest number of neighbors is the threshold.
+      val maxNeighborsForAnomaly = numNeighborsPerPointRDD.map(_._2).takeOrdered(numAnomalies).last
+      val predictionsAndEstimatorsRDD = numNeighborsPerPointRDD.map({case (id,rec) => (id,(rec<=maxNeighborsForAnomaly,(1-(rec.toDouble/maxNeighbors))))})
+      val nAnomaliesDetected=predictionsAndEstimatorsRDD.filter(_._2._1).count()
+      println(s"Results:\n\t# of anomalies detected: $nAnomaliesDetected (${nAnomaliesDetected*100.0/numNeighborsPerPointRDD.count()}%)")
+      println(s"DEBUG -- maxNeighbors:$maxNeighbors maxNeighborsForAnomaly:$maxNeighborsForAnomaly minNeighbors:$minNeighbors")
+
+      val labelsRDD = trainingDataRDD.map({ case (id, point) => (id, point.label==ANOMALY_VALUE) })
+      val checkRDD = predictionsAndEstimatorsRDD.join(labelsRDD)
+                                            .map(
+                                                {
+                                                  case (id, ((pred,estimator), label)) => 
+                                                   //(if (pred) 1.toDouble else 0.toDouble, estimator, if (label) 1.toDouble else 0.toDouble)
+                                                    (pred,estimator,label)
+                                                })
+      
+      //estimationsRDD.take(100).foreach(println)
+      //val totalRows = numNeighborsPerPointRDD.count().toInt
+      //println("DEBUG -- threshold_per "+totalRows*threshold_per)
+      println("DEBUG -- labelsRDD count: "+labelsRDD.count())
+      println("DEBUG -- predictionsRDD count "+predictionsAndEstimatorsRDD.count())
+      val confMat =  checkRDD.map(
+                                  {
+                                    case (pred,estimator,label) => 
+                                          var vp=if(label && pred) 1 else 0
+                                          var vn=if(!label && !pred) 1 else 0
+                                          var fp=if(!label && pred) 1 else 0
+                                          var fn=if(label && !pred) 1 else 0 
+                                          (vp,vn,fp,fn)
+                                  })
+                              .reduce(
+                                  {
+                                    case ((tp1,tn1,fp1,fn1), (tp2,tn2,fp2,fn2)) =>
+                                          (tp1+tp2, tn1+tn2, fp1+fp2, fn1+fn2)
+                                  })
+      val tp =confMat._1.toFloat
+      val tn =confMat._2.toFloat
+      val fp =confMat._3.toFloat
+      val fn =confMat._4.toFloat
+      
+      val accuracy = (tp+tn)/(tp+tn+fp+fn)
+      val precision = (tp)/(tp+fp)
+      val recall = (tp)/(tp+fn)
+      val f1score = 2*((precision*recall)/(precision+recall))
+      val metricsForEstimation = new BinaryClassificationMetrics(checkRDD.map({case (pred,estimator,label) => (estimator, if (label) 1.toDouble else 0.toDouble)}))
+      val metricsForPrediction = new BinaryClassificationMetrics(checkRDD.map({case (pred,estimator,label) => (if (pred) 1.toDouble else 0.toDouble, if (label) 1.toDouble else 0.toDouble)}))
       // AUROC
-      var auROC = metrics.areaUnderROC
-      var auROC2 = metrics2.areaUnderROC
+      val auROCForEstimation = metricsForEstimation.areaUnderROC
+      val auROCForPrediction = metricsForPrediction.areaUnderROC
       
-      print("pointsPerHash")
-      pointsPerHash.take(100).foreach(println)
-//      println("label")
-//      label.take(500).foreach(println)
+      //print("pointsPerHash")
+      //numNeighborsPerPointRDD.take(100).foreach(println)
       
-      println("confMatTuple: "+confMat)
-      println("accuracy: "+accuracy)
-      println("precision: "+precision)
-      println("recall: "+recall)
-      println("f1score: "+f1score)
-      println("Area under ROC (training)= " + auROC)
-      println("AUC 2= " + auROC2)
-      //print("Num Anomalias: "+label.filter({ case (n1, x) => x == true }).count())
-      
-
-//      println("rddFinal")
-//      rddFinal.take(500).foreach(println)
-//      println("pointsPerHash")
-//      pointsPerHash.take(500).foreach(println)
-      //print("bMapAnomalies: "+rddAnomalies.id)
-      
-      
-
-      
-
-      
+      println("\tconfMatTuple: "+confMat)
+      println("\taccuracy: "+accuracy)
+      println("\tprecision: "+precision)
+      println("\trecall: "+recall)
+      println("\tf1score: "+f1score)
+      println("\tArea under ROC (estimation)= " + auROCForEstimation)
+      println("\tArea under ROC (prediction)= " + auROCForPrediction)
     }
     else
-    {
       println("No data")
-    }
+      
     //Stop the Spark Context
     sc.stop()
   }
