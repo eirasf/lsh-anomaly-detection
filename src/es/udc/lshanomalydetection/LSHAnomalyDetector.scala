@@ -121,8 +121,9 @@ Advanced LSH options:
 
     
     val ANOMALY_VALUE = 1
-    //TODO - Retain only 60% of anomalies - WHY?
-    val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.6)  })
+    //Retain only 60% of anomalies - WHY?
+    //val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.6)  })
+    val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.05)  })
     trainingDataRDD.cache()
     
     val numAnomalies=trainingDataRDD.map({case (id, point) => if (point.label==ANOMALY_VALUE) 1 else 0}).sum.toInt
@@ -130,7 +131,7 @@ Advanced LSH options:
     println("Tuning hasher...")
     //Get a new hasher
     //Autoconfig
-    val (hasher,nComps,suggestedRadius)=EuclideanLSHasherForAnomaly.getHasherForDataset(dataRDD, 5000) //Make constant size buckets
+    val (hasher,nComps,suggestedRadius)=EuclideanLSHasherForAnomaly.getHasherForDataset(dataRDD, 50) //Make constant size buckets
     //Quick Parameters
     //val hasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, keyLength, numTables)
     
@@ -141,7 +142,9 @@ Advanced LSH options:
     val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
     if(hashNeighborsRDD!=null)
     {
-      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
+      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x =>
+                                                                                var nNeighbors=l.size-1//if (l.size>2000) 2000 else l.size-1 
+                                                                                (x, nNeighbors)})})
                                                     .reduceByKey(_ + _)
                                                     //.sortBy(_._2) //No need to sort the entire RDD here
                                                     //.partitionBy(new HashPartitioner(numPartitions))
