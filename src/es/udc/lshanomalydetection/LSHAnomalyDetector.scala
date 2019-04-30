@@ -121,8 +121,7 @@ Advanced LSH options:
 
     
     val ANOMALY_VALUE = 1
-    //Retain only 60% of anomalies - WHY?
-    //val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.6)  })
+    //TODO Try to retain only around 2-3% of anomalies so that they are indeed anomalies.
     val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.05)  })
     trainingDataRDD.cache()
     
