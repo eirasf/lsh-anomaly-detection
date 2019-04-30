@@ -101,18 +101,13 @@ Advanced LSH options:
     val threshold_per = threshold/100f
     
     val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
-    val suggestedRadius = options("radius_start").asInstanceOf[Double]
-    val keyLength=5
-    val numTables=250//00
-    
-                 
-    //println("Using "+method+" to compute "+numNeighbors+"NN graph for dataset "+justFileName)
-    //println("R0:"+radius0+(if (numTables!=null)" num_tables:"+numTables else "")+(if (keyLength!=null)" keyLength:"+keyLength else "")+(if (maxComparisons!=null)" maxComparisons:"+maxComparisons else ""))
+    val paramRadius = options("radius_start").asInstanceOf[Double]
+    val keyLength=7//5
+    val numTables=2//5000
     
     //Set up Spark Context
     val sc=sparkContextSingleton.getInstance()
     println(s"Default parallelism: ${sc.defaultParallelism}")
-    println(s"Arguments:\n\tDataset:$datasetFile\n\tKL:$keyLength\n\tR0:$suggestedRadius\n\tNT:$numTables\n\tThreshold:$threshold_per")
     
     //Stop annoying INFO messages
     val rootLogger = Logger.getRootLogger()
@@ -132,15 +127,18 @@ Advanced LSH options:
     
     val numAnomalies=trainingDataRDD.map({case (id, point) => if (point.label==ANOMALY_VALUE) 1 else 0}).sum.toInt
     println(s"Number of elements: ${trainingDataRDD.count()} ($numAnomalies anomalies)")
-    
+    println("Tuning hasher...")
     //Get a new hasher
     //Autoconfig
-    //val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, 200) //Make constant size buckets
+    val (hasher,nComps,suggestedRadius)=EuclideanLSHasherForAnomaly.getHasherForDataset(dataRDD, 5000) //Make constant size buckets
     //Quick Parameters
-    val hasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, keyLength, numTables)
+    //val hasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, keyLength, numTables)
+    
+    println(s"Arguments:\n\tDataset:$datasetFile\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}\n\tThreshold:$threshold_per")
     
     println("Training...")
-    val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, hasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
+    val newHasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, hasher.keyLength, 100*hasher.numTables)
+    val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
     if(hashNeighborsRDD!=null)
     {
       val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
@@ -174,6 +172,8 @@ Advanced LSH options:
       //println("DEBUG -- threshold_per "+totalRows*threshold_per)
       println("DEBUG -- labelsRDD count: "+labelsRDD.count())
       println("DEBUG -- predictionsRDD count "+predictionsAndEstimatorsRDD.count())
+      println("DEBUG -- Estimators:")
+      checkRDD.sample(false, 0.01, 2165149).sortBy(_._2).collect().foreach(println)
       val confMat =  checkRDD.map(
                                   {
                                     case (pred,estimator,label) => 
