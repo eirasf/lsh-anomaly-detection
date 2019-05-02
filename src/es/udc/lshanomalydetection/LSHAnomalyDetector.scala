@@ -26,10 +26,14 @@ import es.udc.graph.sparkContextSingleton
 import es.udc.graph.LSHKNNGraphBuilder
 import es.udc.graph.EuclideanLSHasherForAnomaly
 
+import vegas._
+import vegas.data.External._
+
 object LSHAnomalyDetector
 {
   val DEFAULT_NUM_PARTITIONS:Double=512
   val DEFAULT_THRESHOLD:Int=1
+  val ANOMALY_VALUE = 1
   
   def showUsageAndExit()=
   {
@@ -84,65 +88,58 @@ Advanced LSH options:
     }
     return m.toMap
   }
-  def main(args: Array[String])
+  
+  def findAnomalies(trainingDataRDD:RDD[(Long,LabeledPoint)], desiredSize:Int, numAnomalies:Int, histogramFilePath:Option[String])
   {
-    //println("JM-> args: "+args(0))
-    if (args.length <= 0)
-    {
-      showUsageAndExit()
-      return
-    }
-    
-    val options=parseParams(args)
-    
-    val datasetFile=options("dataset").asInstanceOf[String]
-    
-    val threshold = options("threshold").asInstanceOf[Double].toInt
-    val threshold_per = threshold/100f
-    
-    val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
-    val paramRadius = options("radius_start").asInstanceOf[Double]
-    val keyLength=7//5
-    val numTables=2//5000
-    
-    //Set up Spark Context
-    val sc=sparkContextSingleton.getInstance()
-    println(s"Default parallelism: ${sc.defaultParallelism}")
-    
-    //Stop annoying INFO messages
-    val rootLogger = Logger.getRootLogger()
-    rootLogger.setLevel(Level.WARN)
-    
-    //Load data from file
-    val dataRDD: RDD[(Long,LabeledPoint)] = MLUtils.loadLibSVMFile(sc, datasetFile)
-                                              .zipWithIndex()
-                                              .map(_.swap)
-                                              .partitionBy(new HashPartitioner(numPartitions))
-
-    
-    val ANOMALY_VALUE = 1
-    //TODO Try to retain only around 2-3% of anomalies so that they are indeed anomalies.
-    val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.05)  })
-    trainingDataRDD.cache()
-    
-    val numAnomalies=trainingDataRDD.map({case (id, point) => if (point.label==ANOMALY_VALUE) 1 else 0}).sum.toInt
-    println(s"Number of elements: ${trainingDataRDD.count()} ($numAnomalies anomalies)")
-    println("Tuning hasher...")
+    println(s"Tuning hasher with desiredSize=$desiredSize...")
     //Get a new hasher
     //Autoconfig
-    val (hasher,nComps,suggestedRadius)=EuclideanLSHasherForAnomaly.getHasherForDataset(dataRDD, 50) //Make constant size buckets
+    val (hasher,nComps,suggestedRadius)=EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD, desiredSize) //Make constant size buckets
     //Quick Parameters
     //val hasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, keyLength, numTables)
     
-    println(s"Arguments:\n\tDataset:$datasetFile\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}\n\tThreshold:$threshold_per")
+    println(s"Autotuned params:\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}")
     
     println("Training...")
-    val newHasher = new EuclideanLSHasher(dataRDD.first()._2.features.size, hasher.keyLength, 100*hasher.numTables)
+    val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, 100*hasher.numTables)
     val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
     if(hashNeighborsRDD!=null)
     {
-      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x =>
-                                                                                var nNeighbors=l.size-1//if (l.size>2000) 2000 else l.size-1 
+      val plotGeneral=Vegas("A simple bar chart with embedded data.").
+        withData(hashNeighborsRDD.map({case l => Map("a" -> l.size)}).collect().toSeq).
+        encodeX("a", Quantitative, bin=Bin(maxbins=20.0)).
+        encodeY(field="*", Quantitative, aggregate=AggOps.Count).
+        mark(Bar)
+        
+      val normalID=trainingDataRDD.filter(_._2.label!=ANOMALY_VALUE).first()._1
+      val plotNormal=Vegas("A simple bar chart with embedded data.").
+        withData(hashNeighborsRDD.filter(_.toSet.contains(normalID)).map({case l => Map("a" -> l.size)}).collect().toSeq).
+        encodeX("a", Quantitative, bin=Bin(maxbins=20.0)).
+        encodeY(field="*", Quantitative, aggregate=AggOps.Count).
+        mark(Bar)
+        
+      val anomalyID=trainingDataRDD.filter(_._2.label==ANOMALY_VALUE).first()._1
+      val plotAnomaly=Vegas("A simple bar chart with embedded data.").
+        withData(hashNeighborsRDD.filter(_.toSet.contains(anomalyID)).map({case l => Map("a" -> l.size)}).collect().toSeq).
+        encodeX("a", Quantitative, bin=Bin(maxbins=20.0)).
+        encodeY(field="*", Quantitative, aggregate=AggOps.Count).
+        mark(Bar)
+        
+      import java.io._
+      val pw = new PrintWriter(new File(histogramFilePath.get))
+      pw.write(plotGeneral.html.headerHTML(""))
+      pw.write(plotGeneral.html.plotHTML("general"))
+      pw.write(plotNormal.html.plotHTML("normal"))
+      pw.write(plotAnomaly.html.plotHTML("anomaly"))
+      pw.write(plotGeneral.html.footerHTML)
+      pw.close
+      
+      //val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x =>
+      //TEST
+      val numNeighborsPerPointRDD = hashNeighborsRDD//.filter(_.size<100)
+                                                    .flatMap({case l => l.map({case x =>
+                                                                                var nNeighbors=l.size-1//if (l.size>2000) 2000 else l.size-1
+                                                                                //(x, 1)})})
                                                                                 (x, nNeighbors)})})
                                                     .reduceByKey(_ + _)
                                                     //.sortBy(_._2) //No need to sort the entire RDD here
@@ -218,6 +215,58 @@ Advanced LSH options:
     }
     else
       println("No data")
+  }
+  
+  def main(args: Array[String])
+  {
+    //println("JM-> args: "+args(0))
+    if (args.length <= 0)
+    {
+      showUsageAndExit()
+      return
+    }
+    
+    val options=parseParams(args)
+    
+    val datasetFile=options("dataset").asInstanceOf[String]
+    
+    val threshold = options("threshold").asInstanceOf[Double].toInt
+    val threshold_per = threshold/100f
+    
+    val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
+    val paramRadius = options("radius_start").asInstanceOf[Double]
+    val keyLength=7//5
+    val numTables=2//5000
+    
+    //Set up Spark Context
+    val sc=sparkContextSingleton.getInstance()
+    println(s"Default parallelism: ${sc.defaultParallelism}")
+    
+    //Stop annoying INFO messages
+    val rootLogger = Logger.getRootLogger()
+    rootLogger.setLevel(Level.WARN)
+    
+    //Load data from file
+    val dataRDD: RDD[(Long,LabeledPoint)] = MLUtils.loadLibSVMFile(sc, datasetFile)
+                                              .zipWithIndex()
+                                              .map(_.swap)
+                                              .partitionBy(new HashPartitioner(numPartitions))
+
+    //TODO Try to retain only around 2-3% of anomalies so that they are indeed anomalies.
+    val trainingDataRDD = dataRDD.filter({case (id, point) => point.label!=ANOMALY_VALUE || (math.random<0.05)  })
+    trainingDataRDD.cache()
+    
+    val numAnomalies=trainingDataRDD.map({case (id, point) => if (point.label==ANOMALY_VALUE) 1 else 0}).sum.toInt
+    println(s"Number of elements: ${trainingDataRDD.count()} ($numAnomalies anomalies)")
+    
+    println(s"Arguments:\n\tDataset:$datasetFile\n\tR0:$paramRadius\n\tThreshold:$threshold_per")
+    if (options.contains("key_length"))
+      println(s"\n\tKL:${options("key_length").asInstanceOf[Double].toInt}")
+    if (options.contains("num_tables"))
+      println(s"\n\tNT:${options("num_tables").asInstanceOf[Double].toInt}")
+
+    for (desiredSize <- List(5,10,50,100,500))
+      findAnomalies(trainingDataRDD, desiredSize, numAnomalies, Some(s"/home/eirasf/Escritorio/test$desiredSize.html"))
       
     //Stop the Spark Context
     sc.stop()
