@@ -3,15 +3,16 @@ package es.udc.graph
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.linalg.Vector
+import org.apache.spark.internal.Logging
 
-object EuclideanLSHasherForAnomaly extends AutotunedHasher
+object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
 {
   protected def log2(n: Double): Double =
   {
     Math.log10(n) / Math.log10(2)
   }
   
-  protected final def hashData(data: RDD[(Long, LabeledPoint)], hasher: EuclideanLSHasher, radius: Double): RDD[(Hash, Long)] =
+  def hashData(data: RDD[(Long, LabeledPoint)], hasher: EuclideanLSHasher, radius: Double): RDD[(Hash, Long)] =
   {
     data.flatMap({ case (index, point) => hasher.getHashes(point.features, index, radius) });
   }
@@ -34,7 +35,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
     val numElems=data.count()
     var initialKLength: Int = Math.ceil(log2(numElems / dimension)).toInt + 1
     if (initialKLength<2) initialKLength=2
-    println(s"DEBUG: numElems=$numElems dimension=$dimension initialKLength=$initialKLength")
+    logDebug(s"DEBUG: numElems=$numElems dimension=$dimension initialKLength=$initialKLength")
     val minKLength=if (initialKLength>2) (initialKLength / 2).toInt else 1 
     val maxKLength=if (initialKLength>15) (initialKLength * 1.5).toInt else 22
     val hNTables: Int = Math.floor(Math.pow(log2(dimension), 2)).toInt
@@ -43,7 +44,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
     val currentData=initialData
     //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.
     
-    println(s"Starting hyperparameter adjusting with:\n\tL:$initialKLength\n\tN:$hNTables\n\tR:$INITIAL_RADIUS\n\tC:$desiredMinComparisonsAdjusted")
+    logInfo(s"Starting hyperparameter adjusting with:\n\tL:$initialKLength\n\tN:$hNTables\n\tR:$INITIAL_RADIUS\n\tC:$desiredMinComparisonsAdjusted")
     
     var (leftLimit,rightLimit)=(minKLength,maxKLength)
     var radius = INITIAL_RADIUS
@@ -61,7 +62,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
       
       if ((minNumNeighbors>=desiredMinComparisonsAdjusted*MIN_TOLERANCE) && (minNumNeighbors<=desiredMinComparisonsAdjusted*MAX_TOLERANCE))
       {
-        println(s"Found suitable hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
+        logInfo(s"Found suitable hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
         return (tmpHasher,radius)
       }
       else
@@ -73,7 +74,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
           {
             if (isRadiusAdjusted)
             {
-              println(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
+              logWarning(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
               return (tmpHasher,radius)
             }
             //We start over with a larger the radius
@@ -91,7 +92,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
           {
             if (isRadiusAdjusted)
             {
-              println(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
+              logWarning(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
               return (tmpHasher,radius)
             }
             //We start over with a smaller the radius
@@ -105,12 +106,12 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
         }
         if (rightLimit<=leftLimit)
         {
-          println(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
+          logWarning(s"WARNING! - Had to go with hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
           return (tmpHasher,radius)
         }
       }
       
-      println(s"keyLength update to ${tmpHasher.keyLength} [$leftLimit - $rightLimit] with radius $radius because minNumNeighbors was $minNumNeighbors and wanted [${desiredMinComparisonsAdjusted*MIN_TOLERANCE} - ${desiredMinComparisonsAdjusted*MAX_TOLERANCE}]")
+      logDebug(s"keyLength update to ${tmpHasher.keyLength} [$leftLimit - $rightLimit] with radius $radius because minNumNeighbors was $minNumNeighbors and wanted [${desiredMinComparisonsAdjusted*MIN_TOLERANCE} - ${desiredMinComparisonsAdjusted*MAX_TOLERANCE}]")
     }
     return (new EuclideanLSHasher(dimension, 1, hNTables), radius)//Dummy
   }
@@ -133,12 +134,12 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
                         
                        val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
                        done=minNumNeighbors>desiredMinCount*2
-                       println(s"Radius range updated to [$leftLimit - $currentValue] got a minNumNeighbors of $minNumNeighbors")
+                       logDebug(s"Radius range updated to [$leftLimit - $currentValue] got a minNumNeighbors of $minNumNeighbors")
                        if (!done)
                          currentValue*=2
                        if ((minNumNeighbors>MIN_TOLERANCE*desiredMinCount) && (minNumNeighbors<MAX_TOLERANCE*desiredMinCount))
                        {
-                         println(s"Found suitable radius at $currentValue")
+                         logInfo(s"Found suitable radius at $currentValue")
                          return currentValue
                        }
                      }
@@ -152,10 +153,10 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
                                                     .reduceByKey(_ + _)
       
       val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
-      println(s"Radius update to $radius [$leftLimit - $rightLimit] got a minNumNeighbors of $minNumNeighbors")
+      logDebug(s"Radius update to $radius [$leftLimit - $rightLimit] got a minNumNeighbors of $minNumNeighbors")
       if ((minNumNeighbors>=MIN_TOLERANCE*desiredMinCount) && (minNumNeighbors<=MAX_TOLERANCE*desiredMinCount))
       {
-        println(s"Found suitable radius at $radius")
+        logInfo(s"Found suitable radius at $radius")
         return radius
       }
       //if ((numBuckets==0) || (largestBucketSize<MIN_TOLERANCE*desiredCount))
@@ -177,7 +178,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
         }
       if (rightLimit-leftLimit<0.000000001)
       {
-        println(s"WARNING! - Had to select radius = $radius")
+        logWarning(s"WARNING! - Had to select radius = $radius")
         return radius
       }
     }
@@ -194,7 +195,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher
     //val (hasher,radius) = computeBestKeyLength(data, dimension, (desiredComparisons/1.5).toInt)
     val (hasher,radius) = computeBestKeyLength(data, dimension, desiredComparisons)
 
-    println("R0:" + radius + " num_tables:" + hasher.numTables + " keyLength:" + hasher.keyLength + " desiredComparisons:" + desiredComparisons)
+    logDebug("R0:" + radius + " num_tables:" + hasher.numTables + " keyLength:" + hasher.keyLength + " desiredComparisons:" + desiredComparisons)
     //System.exit(0) //DEBUG
     return (hasher, desiredComparisons, radius)
   }
