@@ -15,6 +15,8 @@ resolvers ++= Seq(
   "apache-snapshots" at "http://repository.apache.org/snapshots/"
 )
 
+unmanagedJars in Compile += file("lib/spark-knine-0.2.jar")
+
 libraryDependencies += "org.vegas-viz" %% "vegas" % {vegasVersion}
 
 libraryDependencies ++= Seq(

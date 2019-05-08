@@ -1,55 +1,41 @@
 package es.udc.lshanomalydetection
 
-import org.apache.spark.SparkContext._
-import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.rdd.RDD
-import org.apache.spark.mllib.util.MLUtils
-import org.apache.spark.SparkConf
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
-import Array._
-import scala.util.Random
-import scala.util.control.Breaks._
-import org.apache.spark.mllib.linalg.DenseVector
-import org.apache.spark.mllib.linalg.SparseVector
-//import es.udc.graph.utils.GraphUtils
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.ml.linalg.Vector
-import org.apache.spark.ml.linalg.{Vectors => MLVectors}
-import org.apache.log4j.{Level, Logger}
+import java.io.File
+import java.io.PrintWriter
 
-import sys.process._
-import org.apache.spark.sql.SparkSession
+import org.apache.log4j.Level
+import org.apache.log4j.Logger
 import org.apache.spark.HashPartitioner
-import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
-import es.udc.graph.EuclideanLSHasher
-import es.udc.graph.KNiNe
-import es.udc.graph.sparkContextSingleton
-import es.udc.graph.LSHKNNGraphBuilder
-import es.udc.graph.EuclideanLSHasherForAnomaly
-
-import vegas._
-import vegas.data.External._
-import org.apache.spark.ml.classification.ClassificationModel
-import es.udc.graph.Hash
-import es.udc.graph.Hasher
-import org.apache.spark.ml.util.Identifiable
-import org.apache.spark.ml.classification.Classifier
-import org.apache.spark.ml.Estimator
-import org.apache.spark.ml.param.Params
+import org.apache.spark.internal.Logging
+import org.apache.spark.ml.PredictionModel
+import org.apache.spark.ml.linalg.Vector
+import org.apache.spark.ml.linalg.{ Vectors => MLVectors }
 import org.apache.spark.ml.param.Param
 import org.apache.spark.ml.param.ParamMap
-import org.apache.spark.sql.Dataset
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.types.IntegerType
-import org.apache.spark.sql.types.StructField
-import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.types.BooleanType
-import org.apache.spark.ml.Predictor
-import org.apache.spark.ml.PredictionModel
-import org.apache.spark.ml.linalg.VectorUDT
-import org.apache.spark.mllib.linalg.VectorUDT
-import org.apache.spark.internal.Logging
+import org.apache.spark.ml.param.Params
+import org.apache.spark.ml.util.Identifiable
+import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+//import es.udc.graph.utils.GraphUtils
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.mllib.util.MLUtils
+import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
+
+import es.udc.graph.EuclideanLSHasher
+import es.udc.graph.EuclideanLSHasherForAnomaly
+import es.udc.graph.Hash
+import es.udc.graph.Hasher
+import es.udc.graph.KNiNe
+import es.udc.graph.LSHKNNGraphBuilder
+import es.udc.graph.sparkContextSingleton
+import vegas.AggOps
+import vegas.Bar
+import vegas.Bin
+import vegas.DefaultValueTransformer
+import vegas.Quantitative
+import vegas.Vegas
+import org.apache.spark.mllib.feature.StandardScaler
 
 trait LSHAnomalyDetectorParams extends Params
 {
@@ -76,7 +62,7 @@ class LSHAnomalyDetectorModel(private val hashCounts:scala.collection.Map[Hash,I
   def getEstimator(features:Vector):Double=
   {
     val hashes=hasher.getHashes(Vectors.dense(features.toArray), -1, radius)
-    return hashes.map({case (h,id) => hashCounts.getOrElse(h, 0)}).sum
+    return -hashes.map({case (h,id) => hashCounts.getOrElse(h, 0)}).sum
   }
   val uid: String = Identifiable.randomUID("LSHAnomalyDetectorModel")
   override def copy(extra:ParamMap): LSHAnomalyDetectorModel = defaultCopy(extra)
@@ -164,8 +150,7 @@ class LSHAnomalyDetector(override val uid: String)
           encodeX("a", Quantitative, bin=Bin(maxbins=20.0)).
           encodeY(field="*", Quantitative, aggregate=AggOps.Count).
           mark(Bar)
-          
-        import java.io._
+        
         val pw = new PrintWriter(new File(histogramPath))
         pw.write(plotGeneral.html.headerHTML(""))
         pw.write(plotGeneral.html.plotHTML("general"))
@@ -252,7 +237,7 @@ Advanced LSH options:
     return m.toMap
   }
   
-  def evaluateModel(model:LSHAnomalyDetectorModel, testDataRDD:RDD[LabeledPoint])=
+  def evaluateModel(model:LSHAnomalyDetectorModel, testDataRDD:RDD[LabeledPoint]):Double=
   {
     val bModel=testDataRDD.sparkContext.broadcast(model)
     val checkRDD = testDataRDD.map(
@@ -302,6 +287,8 @@ Advanced LSH options:
       println("\tf1score: "+f1score)
       println("\tArea under ROC (estimation)= " + auROCForEstimation)
       println("\tArea under ROC (prediction)= " + auROCForPrediction)
+      
+      return auROCForEstimation
   }
   
   def main(args: Array[String])
@@ -330,12 +317,17 @@ Advanced LSH options:
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
-    val DATASETS_ROOT="/mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
+    val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
     val NUM_FOLDS=5
+    
+    val pw = new PrintWriter(new File("/home/eirasf/Escritorio/summary.txt"))
     
     for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29","arritmia","german_statlog"))
     {
-      val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, DATASETS_ROOT+datasetName)
+      val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, DATASETS_ROOT+datasetName+".libsvm")
+      
+      val scaler = new StandardScaler(withMean = true, withStd = true).fit(dataRDD.map(x => x.features))
+      val standardDataRDD=dataRDD.map({case p => new LabeledPoint(p.label,scaler.transform(p.features))})
       
       val folds=MLUtils.kFold(dataRDD, NUM_FOLDS, System.nanoTime().toInt)
       
@@ -343,13 +335,14 @@ Advanced LSH options:
         for (bs <- Array(5,10,100))
         {
           var i=0
+          var totalAUC=0.0
           for (f <- folds)
           {
             i=i+1
             val trainDataRDD=f._1
             val testDataRDD=f._2
             
-            println(s"\n\n----------------------------------\n$datasetFile - Fold #$i - MinBucketSize:$bs - Multiplying factor:$mf")
+            println(s">>>> $datasetName - Fold #$i - MinBucketSize:$bs - Multiplying factor:$mf")
             try
             {
               val model=new LSHAnomalyDetector()
@@ -359,15 +352,19 @@ Advanced LSH options:
                             .fit(trainDataRDD)
                             
               
-              evaluateModel(model,testDataRDD)
+              totalAUC+=evaluateModel(model,testDataRDD)
             }catch
             {
               case e : Exception =>
                 println("ERROR")
             }
           }
+          println(s"----------------------------------\n$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS}\n\n\n\n")
+          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS}")
+          pw.flush()
         }
     }
+    pw.close
 
     //Stop the Spark Context
     sc.stop()
