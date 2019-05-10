@@ -87,7 +87,7 @@ class LSHAnomalyDetector(override val uid: String)
   def setHistogramFilePath(v:Option[String]):this.type=set(histogramFilePath, v)
   setDefault(histogramFilePath, None)
   def setNumTablesMultiplier(v:Int):this.type=set(numTablesMultiplier, v)
-  setDefault(numTablesMultiplier, 100)
+  setDefault(numTablesMultiplier, 1)
   def setManualParams(kl:Int, nt:Int, r:Double):this.type=
   {
     set(keyLength, Some(kl))
@@ -133,11 +133,12 @@ class LSHAnomalyDetector(override val uid: String)
     logDebug(message)
     println(message)
     
-    val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, 100*hasher.numTables)
+    val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, $(numTablesMultiplier)*hasher.numTables)
     
     //val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
-    val hashedDataRDD=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher, suggestedRadius)
-                                                 .groupByKey()
+    val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher, suggestedRadius)
+    println(s"Generated ${hashedDataRDDPrevious.count()} hashes for ${trainingDataRDD.count()} elements.")
+    val hashedDataRDD=hashedDataRDDPrevious.groupByKey()
     hashedDataRDD.cache()
     val hashNeighborsRDD=hashedDataRDD.map(_._2)
    
@@ -182,7 +183,6 @@ class LSHAnomalyDetector(override val uid: String)
     
     //Retrieve the N=numAnomalies elements with fewer neighbors. They will constitute the predicted anomalies. The largest number of neighbors is the threshold.
     val maxNeighborsForAnomaly = numNeighborsPerPointRDD.map(_._2).takeOrdered(numAnomalies.toInt).last
-    
     
     new LSHAnomalyDetectorModel(hashedDataRDD.map({case (hash,neighbors) => (hash,neighbors.size)}).collectAsMap(),
                                 newHasher,
@@ -326,7 +326,7 @@ Advanced LSH options:
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
-    val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, datasetFile, -1, options("num_partitions").asInstanceOf[Double].toInt)
+    val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, datasetFile)
       
     val scaler = new StandardScaler(withMean = true, withStd = true).fit(dataRDD.map(x => x.features))
     val standardDataRDD=dataRDD.map({case p => new LabeledPoint(p.label,scaler.transform(p.features))})
@@ -336,10 +336,12 @@ Advanced LSH options:
     val trainDataRDD=splits(0)
     val testDataRDD=splits(1)
     
+    
     val model=
       if (paramRadius.isDefined && keyLength.isDefined && numTables.isDefined)
       {
         new LSHAnomalyDetector()
+                        .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
                         //MANUAL
                         .setManualParams(keyLength.get, numTables.get, paramRadius.get)
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
@@ -348,6 +350,7 @@ Advanced LSH options:
       else
       {
         new LSHAnomalyDetector()
+                        .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
                         //AUTO TUNING
                         .setMinBucketSize(5)
                         .setNumTablesMultiplier(5)
