@@ -31,10 +31,10 @@ object GridExplore
     val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
     val NUM_FOLDS=5
     
-    val pw = new PrintWriter(new File("/home/eirasf/Escritorio/summary.txt"))
+    val pw = new PrintWriter(new File("/home/eirasf/Escritorio/reachability/grid-summary-abalones.txt"))
     
-    //for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29","arritmia","german_statlog"))
-    for (datasetName <- Array("arritmia","german_statlog"))
+    for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29"))
+    //for (datasetName <- Array("arritmia","german_statlog"))
     {
       val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, DATASETS_ROOT+datasetName+".libsvm")
       
@@ -57,14 +57,14 @@ object GridExplore
             println(s">>>> $datasetName - Fold #$i - MinBucketSize:$bs - Multiplying factor:$mf")
             try
             {
-              val model=new LSHAnomalyDetector()
+              val model=new LSHReachabilityAnomalyDetector()
                             .setMinBucketSize(bs)
                             .setNumTablesMultiplier(mf)
-                            .setHistogramFilePath(Some(s"/home/eirasf/Escritorio/$datasetName-$bs-$mf.html"))
+                            .setHistogramFilePath(Some(s"/home/eirasf/Escritorio/reachability/$datasetName-$bs-$mf.html"))
                             .fit(trainDataRDD)
                             
               
-              totalAUC+=LSHAnomalyDetector.evaluateModel(model,testDataRDD)
+              totalAUC+=LSHReachabilityAnomalyDetector.evaluateModel(model,testDataRDD)
             }catch
             {
               case e : Exception =>
