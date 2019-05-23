@@ -5,8 +5,17 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.internal.Logging
 
-object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
+trait LoggingTEMP
 {
+  def logInfo(s: => String):Unit=println(s)
+  def logDebug(s: => String):Unit=println(s)
+  def logWarning(s: => String):Unit=println(s)
+}
+
+object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
+{
+  override val MIN_TOLERANCE=0.2
+  override val MAX_TOLERANCE=2.0
   protected def log2(n: Double): Double =
   {
     Math.log10(n) / Math.log10(2)
@@ -39,7 +48,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
     val minKLength=if (initialKLength>2) (initialKLength / 2).toInt else 1 
     val maxKLength=if (initialKLength>15) (initialKLength * 1.5).toInt else 22
     val hNTables: Int = Math.floor(Math.pow(log2(dimension), 2)).toInt
-    val desiredMinComparisonsAdjusted=desiredMinComparisons*hNTables
+    val desiredMinComparisonsAdjusted=desiredMinComparisons
     
     val currentData=initialData
     //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.
@@ -118,6 +127,8 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
   
   def getSuitableRadius(data:RDD[(Long,LabeledPoint)], hasher:EuclideanLSHasher, minValue:Double, maxValue:Option[Double], desiredMinCount:Int):Double=
   {
+    val MIN_TOLERANCE_RADIUS=0.1
+    val MAX_TOLERANCE_RADIUS=10.0
     var leftLimit=minValue
     var rightLimit=if (maxValue.isDefined)
                      maxValue.get
@@ -137,7 +148,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
                        logDebug(s"Radius range updated to [$leftLimit - $currentValue] got a minNumNeighbors of $minNumNeighbors")
                        if (!done)
                          currentValue*=2
-                       if ((minNumNeighbors>MIN_TOLERANCE*desiredMinCount) && (minNumNeighbors<MAX_TOLERANCE*desiredMinCount))
+                       if ((minNumNeighbors>MIN_TOLERANCE_RADIUS*desiredMinCount) && (minNumNeighbors<MAX_TOLERANCE_RADIUS*desiredMinCount))
                        {
                          logInfo(s"Found suitable radius at $currentValue")
                          return currentValue
@@ -154,16 +165,16 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with Logging
       
       val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
       logDebug(s"Radius update to $radius [$leftLimit - $rightLimit] got a minNumNeighbors of $minNumNeighbors")
-      if ((minNumNeighbors>=MIN_TOLERANCE*desiredMinCount) && (minNumNeighbors<=MAX_TOLERANCE*desiredMinCount))
+      if ((minNumNeighbors>=MIN_TOLERANCE_RADIUS*desiredMinCount) && (minNumNeighbors<=MAX_TOLERANCE_RADIUS*desiredMinCount))
       {
         logInfo(s"Found suitable radius at $radius")
         return radius
       }
       //if ((numBuckets==0) || (largestBucketSize<MIN_TOLERANCE*desiredCount))
-      if (minNumNeighbors<MIN_TOLERANCE*desiredMinCount)
+      if (minNumNeighbors<MIN_TOLERANCE_RADIUS*desiredMinCount)
         leftLimit=radius
       else
-        if (minNumNeighbors>MIN_TOLERANCE*desiredMinCount)
+        if (minNumNeighbors>MIN_TOLERANCE_RADIUS*desiredMinCount)
         {
           rightLimit=radius
           /*

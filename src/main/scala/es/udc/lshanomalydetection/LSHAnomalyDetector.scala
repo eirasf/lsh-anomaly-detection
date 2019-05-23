@@ -125,7 +125,7 @@ class LSHAnomalyDetector(override val uid: String)
     //Get a new hasher
     val (hasher,nComps,suggestedRadius)=
       if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty)
-        EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD, desiredSize)//Autoconfig
+        EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD.sample(false, 0.05, System.nanoTime()), desiredSize)//Autoconfig
       else
         (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get),desiredSize,$(radius).get) 
     

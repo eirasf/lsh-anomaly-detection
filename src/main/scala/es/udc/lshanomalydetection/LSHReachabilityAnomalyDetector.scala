@@ -122,10 +122,11 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
       }
     
     logDebug(s"Tuning hasher with desiredSize=$desiredSize...")
+    println(s"Tuning hasher with desiredSize=$desiredSize...")
     //Get a new hasher
     val (hasher,nComps,suggestedRadius)=
       if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty)
-        EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD, desiredSize)//Autoconfig
+        EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD.sample(false, 0.05, System.nanoTime()), desiredSize)//Autoconfig
       else
         (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get),desiredSize,$(radius).get) 
     
@@ -141,8 +142,11 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
     val hashedDataRDD=hashedDataRDDPrevious.groupByKey()
     val reachabilityRDD=hashedDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})})
                                      .reduceByKey({case ((r1,c1,hl1),(r2,c2,hl2)) => (r1+r2,c1+c2,hl1++hl2)})
-                                     .flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,r.toDouble/c)})})
+                                     .flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,1.0/r.toDouble)})})
                                      .reduceByKey(_+_)
+                                     //.flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,(r.toDouble,1))})})
+                                     //.reduceByKey({case ((r1,c1),(r2,c2)) => (r1+r2,c1+c2)})
+                                     //.map({case (h,(r,c)) => (h,c.toDouble/r)})
     //hashedDataRDD.cache()
     //val hashNeighborsRDD=hashedDataRDD.map(_._2)
     
@@ -198,7 +202,7 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
 
 object LSHReachabilityAnomalyDetector
 {
-  val DEFAULT_NUM_PARTITIONS:Double=512
+  val DEFAULT_NUM_PARTITIONS:Double=32
   val ANOMALY_VALUE=1.0
   
   def showUsageAndExit()=
@@ -357,7 +361,7 @@ Advanced LSH options:
         new LSHReachabilityAnomalyDetector()
                         .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
                         //AUTO TUNING
-                        .setMinBucketSize(20)
+                        .setMinBucketSize(50)
                         .setNumTablesMultiplier(5)
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
                         .fit(trainDataRDD)

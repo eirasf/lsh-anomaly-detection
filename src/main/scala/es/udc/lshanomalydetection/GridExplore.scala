@@ -31,10 +31,9 @@ object GridExplore
     val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
     val NUM_FOLDS=5
     
-    val pw = new PrintWriter(new File("/home/eirasf/Escritorio/reachability/grid-summary-abalones.txt"))
+    val pw = new PrintWriter(new File("/home/eirasf/Escritorio/reachability/grid-summary-fast-full.txt"))
     
-    for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29"))
-    //for (datasetName <- Array("arritmia","german_statlog"))
+    for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29", "arritmia-fix-ohe","german_statlog-ohe","kddcup10-http-normal-vs-all","kddcup10-normal-vs-all","kddcup10-smtp-normal-vs-all"))
     {
       val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, DATASETS_ROOT+datasetName+".libsvm")
       
@@ -43,11 +42,12 @@ object GridExplore
       
       val folds=MLUtils.kFold(dataRDD, NUM_FOLDS, System.nanoTime().toInt)
       
-      for (mf <- Array(5,10,100))
-        for (bs <- Array(5,10,100))
+      for (mf <- Array(10,50,100,500))
+        for (bs <- Array(5,10,100,1000))
         {
           var i=0
           var totalAUC=0.0
+          var totalTime:Long=0
           for (f <- folds)
           {
             i=i+1
@@ -57,22 +57,24 @@ object GridExplore
             println(s">>>> $datasetName - Fold #$i - MinBucketSize:$bs - Multiplying factor:$mf")
             try
             {
+              val timeStart=System.currentTimeMillis()
               val model=new LSHReachabilityAnomalyDetector()
                             .setMinBucketSize(bs)
                             .setNumTablesMultiplier(mf)
                             .setHistogramFilePath(Some(s"/home/eirasf/Escritorio/reachability/$datasetName-$bs-$mf.html"))
                             .fit(trainDataRDD)
                             
-              
+              totalTime+=System.currentTimeMillis()-timeStart
               totalAUC+=LSHReachabilityAnomalyDetector.evaluateModel(model,testDataRDD)
-            }catch
+            }
+            catch
             {
               case e : Exception =>
                 println("ERROR")
             }
           }
-          println(s"----------------------------------\n$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS}\n\n\n\n")
-          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS}\n")
+          println(s"----------------------------------\n$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS}\n\n\n\n")
+          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS}\n")
           pw.flush()
         }
     }
