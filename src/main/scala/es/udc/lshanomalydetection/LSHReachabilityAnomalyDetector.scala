@@ -312,7 +312,6 @@ Advanced LSH options:
   
   def main(args: Array[String])
   {
-    //println("JM-> args: "+args(0))
     if (args.length <= 0)
     {
       showUsageAndExit()

@@ -15,7 +15,7 @@ trait LoggingTEMP
 object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 {
   override val MIN_TOLERANCE=0.2
-  override val MAX_TOLERANCE=2.0
+  override val MAX_TOLERANCE=4.0
   protected def log2(n: Double): Double =
   {
     Math.log10(n) / Math.log10(2)
@@ -136,7 +136,9 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
                    {
                      //Find a radius that is too large
                      var done=false
-                     var currentValue=leftLimit*2
+                     val samplePoints=data.takeSample(false, 2, System.nanoTime())
+                     var currentValue=(new EuclideanDistanceProvider()).getDistance(samplePoints(0)._2, samplePoints(1)._2)
+                     //var currentValue=leftLimit*2
                      while (!done)
                      {
                        val hashNeighborsRDD = getHashNeighbors(data, hasher, currentValue)
