@@ -36,6 +36,10 @@ import vegas.DefaultValueTransformer
 import vegas.Quantitative
 import vegas.Vegas
 import org.apache.spark.mllib.feature.StandardScaler
+import es.udc.graph.LookupProvider
+import es.udc.graph.DistanceProvider
+import es.udc.graph.EuclideanDistanceProvider
+import es.udc.graph.BroadcastLookupProvider
 
 trait LSHReachabilityAnomalyDetectorParams extends Params
 {
@@ -46,6 +50,7 @@ trait LSHReachabilityAnomalyDetectorParams extends Params
   final val keyLength=new Param[Option[Int]](this, "keyLength", "Length of the hashes generated. Only used if numTables and radius are provided.")
   final val numTables=new Param[Option[Int]](this, "numTables", "Number of hashes per key. Only used if keyLength and radius are provided.")
   final val radius=new Param[Option[Double]](this, "radius", "Similarity radius for the euclidean hashing procedure. Only used if keyLength and numTables are provided.")
+  final val splitW=new Param[Option[Double]](this, "splitW", "split the hyperplane every W units")
   //DEBUG
   final val histogramFilePath= new Param[Option[String]](this, "histogramFilePath", "DEBUG - Path to save the histograms")
 }
@@ -54,6 +59,11 @@ class LSHReachabilityAnomalyDetectorModel(private val hashCounts:scala.collectio
   extends PredictionModel[Vector, LSHReachabilityAnomalyDetectorModel]
   with Serializable
 {
+    
+  var avBucketDistance = 0.0
+  var avBucketSize = 0.0
+  var bucketCount:Long = 0
+  
   def predict(features:Vector):Double=
   {
     val hashes=hasher.getHashes(Vectors.dense(features.toArray), -1, radius)
@@ -70,6 +80,7 @@ class LSHReachabilityAnomalyDetectorModel(private val hashCounts:scala.collectio
   val uid: String = Identifiable.randomUID("LSHReachabilityAnomalyDetectorModel")
   override def copy(extra:ParamMap): LSHReachabilityAnomalyDetectorModel = defaultCopy(extra)
 }
+
 
 class LSHReachabilityAnomalyDetector(override val uid: String)
   extends LSHReachabilityAnomalyDetectorParams
@@ -88,6 +99,8 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
   setDefault(histogramFilePath, None)
   def setNumTablesMultiplier(v:Int):this.type=set(numTablesMultiplier, v)
   setDefault(numTablesMultiplier, 1)
+  def setSplitW(v:Option[Double]):this.type=set(splitW, v)
+  setDefault(splitW, Some(4.0))
   def setManualParams(kl:Int, nt:Int, r:Double):this.type=
   {
     set(keyLength, Some(kl))
@@ -97,6 +110,17 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
   setDefault(keyLength, None)
   setDefault(numTables, None)
   setDefault(radius, None)
+
+  
+def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: DistanceProvider):Double ={
+    val pointReference = lookup.lookup(points(0))
+    val pointsDist = points.map({case id => 
+                        val point = lookup.lookup(id)
+                        distance.getDistance(pointReference, point)
+                        })
+   val avDistance = pointsDist.sum/pointsDist.size
+   avDistance
+}
   
   def fit(rddData: RDD[LabeledPoint]): LSHReachabilityAnomalyDetectorModel=
   {
@@ -127,9 +151,28 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
     val (hasher,nComps,suggestedRadius)=
       if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty)
         EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD.sample(false, 0.05, System.nanoTime()), desiredSize)//Autoconfig
+        //EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD, desiredSize)//Autoconfig
       else
-        (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get),desiredSize,$(radius).get) 
-    
+          (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get, $(splitW).get  ),desiredSize,$(radius).get) 
+          
+    val lookup = new BroadcastLookupProvider(dataRDD)
+    val distance = new EuclideanDistanceProvider()
+  
+    val hashedDataRDD = EuclideanLSHasherForAnomaly.hashData(dataRDD, hasher, suggestedRadius)
+    val bucketRDD = hashedDataRDD.groupByKey()
+    val filterBucket = bucketRDD.filter({case (h, ids) => ids.size>1 }).cache()
+    val bucketDistanceRDD =  bucketRDD.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
+    val bucketSizeRDD =  bucketRDD.map({case (h, ids) => ids.size })
+    val avBucketDistance = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
+    val avBucketSize = $(numTables).get/bucketSizeRDD.count().toDouble
+    val bucketCount = bucketRDD.count()
+    println("avBucketDistance: "+avBucketDistance)
+    println("avBucketSize: "+avBucketSize)
+    println("bucketCount: "+bucketCount)
+          
+         
+          
+        
     val message=s"Training params:\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}"
     logDebug(message)
     println(message)
@@ -139,14 +182,15 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
     //val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
     val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher, suggestedRadius)
     println(s"Generated ${hashedDataRDDPrevious.count()} hashes for ${trainingDataRDD.count()} elements.")
-    val hashedDataRDD=hashedDataRDDPrevious.groupByKey()
-    val reachabilityRDD=hashedDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})})
+    val hashDataRDD=hashedDataRDDPrevious.groupByKey()
+    val reachabilityRDD=hashDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})})
                                      .reduceByKey({case ((r1,c1,hl1),(r2,c2,hl2)) => (r1+r2,c1+c2,hl1++hl2)})
                                      .flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,1.0/r.toDouble)})})
                                      .reduceByKey(_+_)
                                      //.flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,(r.toDouble,1))})})
                                      //.reduceByKey({case ((r1,c1),(r2,c2)) => (r1+r2,c1+c2)})
                                      //.map({case (h,(r,c)) => (h,c.toDouble/r)})
+
     //hashedDataRDD.cache()
     //val hashNeighborsRDD=hashedDataRDD.map(_._2)
     
@@ -193,17 +237,21 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
     //Retrieve the N=numAnomalies elements with fewer neighbors. They will constitute the predicted anomalies. The largest number of neighbors is the threshold.
     val maxNeighborsForAnomaly = numNeighborsPerPointRDD.map(_._2).takeOrdered(numAnomalies.toInt).last
     */
-    new LSHReachabilityAnomalyDetectorModel(reachabilityRDD.collectAsMap(),
+    val result = new LSHReachabilityAnomalyDetectorModel(reachabilityRDD.collectAsMap(),
                                 newHasher,
                                 0,
                                 suggestedRadius)
+    result.avBucketDistance = avBucketDistance
+    result.avBucketSize = avBucketSize
+    result.bucketCount = bucketCount
+    result 
   }
 }
 
 object LSHReachabilityAnomalyDetector
 {
   val DEFAULT_NUM_PARTITIONS:Double=32
-  val ANOMALY_VALUE=1.0
+  val ANOMALY_VALUE=1.0 
   
   def showUsageAndExit()=
   {
@@ -255,7 +303,7 @@ Advanced LSH options:
     }
     return m.toMap
   }
-  
+
   def evaluateModel(model:LSHReachabilityAnomalyDetectorModel, testDataRDD:RDD[LabeledPoint]):Double=
   {
     val bModel=testDataRDD.sparkContext.broadcast(model)
@@ -266,6 +314,14 @@ Advanced LSH options:
                                         val f=MLVectors.dense(lp.features.toArray)
                                         (m.predict(f)>0,m.getEstimator(f),lp.label==ANOMALY_VALUE)
                                     })
+                                    
+    val rddToExport = testDataRDD.map(
+                                    {
+                                      case lp =>
+                                        val m=bModel.value
+                                        val f=MLVectors.dense(lp.features.toArray)
+                                        (f,m.getEstimator(f),lp.label==ANOMALY_VALUE)
+                                    })                                
                                     
     val confMat =  checkRDD.map(
                                   {
@@ -286,6 +342,7 @@ Advanced LSH options:
       val fp =confMat._3.toFloat
       val fn =confMat._4.toFloat
       
+      
       val accuracy = (tp+tn)/(tp+tn+fp+fn)
       val precision = (tp)/(tp+fp)
       val recall = (tp)/(tp+fn)
@@ -296,8 +353,20 @@ Advanced LSH options:
       val auROCForEstimation = metricsForEstimation.areaUnderROC
       val auROCForPrediction = metricsForPrediction.areaUnderROC
       
-      //print("pointsPerHash")
-      //numNeighborsPerPointRDD.take(100).foreach(println)
+      
+      
+//      println("Grava Ficheiro")
+////      rddToExport.take(500).foreach(println)
+//      //print(System.nanoTime())
+//      //    Export RDD
+//       
+            // rddToExport.map{case(a, b, c) =>
+           //   var line = a + "," + b +"," + c
+           //   line
+           // }.saveAsTextFile("RddToExport_"+System.nanoTime());
+            
+            
+            
       
       println("\tconfMatTuple: "+confMat)
       println("\taccuracy: "+accuracy)
@@ -366,6 +435,7 @@ Advanced LSH options:
                         .fit(trainDataRDD)
       }
               
+    
     val totalAUC=evaluateModel(model,testDataRDD)
     
     //Stop the Spark Context

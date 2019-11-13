@@ -38,7 +38,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
   private def computeBestKeyLength(data: RDD[(Long,LabeledPoint)], dimension:Int, desiredMinComparisons:Int): (EuclideanLSHasher,Double) =
   {
     val FRACTION=1.0//0.01
-    val INITIAL_RADIUS=0.1
+    val INITIAL_RADIUS=1.0//0.1
     val initialData = data//data.sample(false, FRACTION, 56804023).map(_.swap)
     
     val numElems=data.count()
@@ -47,8 +47,10 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
     logDebug(s"DEBUG: numElems=$numElems dimension=$dimension initialKLength=$initialKLength")
     val minKLength=if (initialKLength>2) (initialKLength / 2).toInt else 1 
     val maxKLength=if (initialKLength>15) (initialKLength * 1.5).toInt else 22
-    val hNTables: Int = Math.floor(Math.pow(log2(dimension), 2)).toInt
+    //val hNTables: Int = Math.floor(Math.pow(log2(dimension), 2)).toInt
+    val hNTables: Int = 10
     val desiredMinComparisonsAdjusted=desiredMinComparisons
+    
     
     val currentData=initialData
     //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.
@@ -176,7 +178,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
       if (minNumNeighbors<MIN_TOLERANCE_RADIUS*desiredMinCount)
         leftLimit=radius
       else
-        if (minNumNeighbors>MIN_TOLERANCE_RADIUS*desiredMinCount)
+        if (minNumNeighbors>MAX_TOLERANCE_RADIUS*desiredMinCount)
         {
           rightLimit=radius
           /*
