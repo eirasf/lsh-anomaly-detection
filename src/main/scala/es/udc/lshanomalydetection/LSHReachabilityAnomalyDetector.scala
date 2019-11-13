@@ -63,6 +63,7 @@ class LSHReachabilityAnomalyDetectorModel(private val hashCounts:scala.collectio
   var avBucketDistance = 0.0
   var avBucketSize = 0.0
   var bucketCount:Long = 0
+  var filteredBucketCount:Long = 0
   
   def predict(features:Vector):Double=
   {
@@ -190,16 +191,18 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
       }
     //FIN DEBUG
     */
-    val bucketDistanceRDD =  bucketRDD.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
-    val bucketSizeRDD =  bucketRDD.map({case (h, ids) => ids.size })
+    val bucketDistanceRDD =  filterBucket.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
+    val bucketSizeRDD =  filterBucket.map({case (h, ids) => ids.size })
     val avBucketDistance = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
     val absoluteAvBucketSize = bucketSizeRDD.sum/dataNumElems
     val avBucketSize = absoluteAvBucketSize/bucketSizeRDD.count().toDouble
     val bucketCount = bucketRDD.count()
+    val filteredBucketCount = filterBucket.count()
     println("avBucketDistance: "+avBucketDistance)
     println("absoluteAvBucketSize: "+absoluteAvBucketSize)
     println("avBucketSize: "+avBucketSize)
     println("bucketCount: "+bucketCount)
+    println("filteredBucketCount: "+filteredBucketCount)
           
          
           
@@ -275,6 +278,7 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     result.avBucketDistance = avBucketDistance
     result.avBucketSize = avBucketSize
     result.bucketCount = bucketCount
+    result.filteredBucketCount = filteredBucketCount
     result 
   }
 }

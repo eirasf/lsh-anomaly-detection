@@ -61,12 +61,13 @@ object GridExplore
 //      for (mf <- Array(10,50,100,500))
 //        for (bs <- Array(5,10,100,1000))
       for (mf <- Array(1))
-        for (bs <- Array(42)) // experimentar aplicar raiz quadrada de total numero de instancias ou ln ou 1%??
+        for (w <- Array(0.01,0.1,1.0,2.0,4.0,8.0)) // experimentar aplicar raiz quadrada de total numero de instancias ou ln ou 1%??
         {
           var i=0
           var totalAvBucketSize=0.0
           var totalAvBucketDistance = 0.0
-          var totalAvBucketCount = 0.0
+          var totalBucketCount = 0.0
+          var totalFilteredBucketCount = 0.0
           var totalAUC=0.0
           var totalTime:Long=0
           
@@ -86,7 +87,7 @@ object GridExplore
            // convertedVecDF_test.coalesce(1).write.format("libsvm").save("testDataRDD_"+i)
             
             
-            println(s">>>> $datasetName - Fold #$i - MinBucketSize:$bs - Multiplying factor:$mf")
+            println(s">>>> $datasetName - Fold #$i - W:$w - Multiplying factor:$mf")
             /*try
             {*/
               
@@ -94,7 +95,7 @@ object GridExplore
               val model=new LSHReachabilityAnomalyDetector()
                             //.setMinBucketSize(bs)
                             //.setNumTablesMultiplier(mf)
-                           .setManualParams(4, 50, 1.0, 1000)
+                           .setManualParams(4, 50, 1.0, w)
                             //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/reachability/$datasetName-$bs-$mf.html"))
                             .fit(trainDataRDD)
                             
@@ -103,7 +104,8 @@ object GridExplore
               
               totalAvBucketSize += model.avBucketSize              
               totalAvBucketDistance+= model.avBucketDistance
-              totalAvBucketCount+= model.bucketCount
+              totalBucketCount+= model.bucketCount
+              totalFilteredBucketCount+= model.filteredBucketCount
               
             /*}
             catch
@@ -112,8 +114,8 @@ object GridExplore
                 println("ERROR")
             }*/
           }//TODO DEBUG
-          println(s"----------------------------------\n$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
-          println(s"----------------------------------\n Avg. BucketSize=${totalAvBucketSize/NUM_FOLDS} - Avg. BucketDistance:${totalAvBucketDistance/NUM_FOLDS} - Avg. BucketCount:${totalAvBucketCount/NUM_FOLDS} - \n\n\n\n")
+          println(s"----------------------------------\n$datasetName - W:$w - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
+          println(s"----------------------------------\n Avg. BucketSize=${totalAvBucketSize/NUM_FOLDS} - Avg. BucketDistance:${totalAvBucketDistance/NUM_FOLDS} - Avg. BucketCount:${totalBucketCount/NUM_FOLDS} - Avg. FilteredBucketCount:${totalFilteredBucketCount/NUM_FOLDS} - \n\n\n\n")
 //          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS}\n")
 //          pw.flush()
         }
