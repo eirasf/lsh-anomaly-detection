@@ -101,15 +101,17 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
   setDefault(numTablesMultiplier, 1)
   def setSplitW(v:Option[Double]):this.type=set(splitW, v)
   setDefault(splitW, Some(4.0))
-  def setManualParams(kl:Int, nt:Int, r:Double):this.type=
+  def setManualParams(kl:Int, nt:Int, r:Double, w:Double):this.type=
   {
     set(keyLength, Some(kl))
     set(numTables, Some(nt))
     set(radius, Some(r))
+    set(splitW, Some(w))
   }
   setDefault(keyLength, None)
   setDefault(numTables, None)
   setDefault(radius, None)
+  setDefault(splitW, None)
 
   
 def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: DistanceProvider):Double ={
@@ -149,11 +151,11 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     println(s"Tuning hasher with desiredSize=$desiredSize...")
     //Get a new hasher
     val (hasher,nComps,suggestedRadius)=
-      if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty)
+      if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty || $(splitW).isEmpty)
         EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD.sample(false, 0.05, System.nanoTime()), desiredSize)//Autoconfig
         //EuclideanLSHasherForAnomaly.getHasherForDataset(trainingDataRDD, desiredSize)//Autoconfig
       else
-          (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get, $(splitW).get  ),desiredSize,$(radius).get) 
+          (new EuclideanLSHasher(dataRDD.first()._2.features.size, $(keyLength).get, $(numTables).get, $(splitW).get),desiredSize,$(radius).get) 
           
     val lookup = new BroadcastLookupProvider(dataRDD)
     val distance = new EuclideanDistanceProvider()
@@ -161,23 +163,52 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     val hashedDataRDD = EuclideanLSHasherForAnomaly.hashData(dataRDD, hasher, suggestedRadius)
     val bucketRDD = hashedDataRDD.groupByKey()
     val filterBucket = bucketRDD.filter({case (h, ids) => ids.size>1 }).cache()
+    
+    /*
+    //DEBUG
+    val bucketOfInterest = filterBucket.filter({case (h, ids) => ids.size<100 }).first()
+    println("---------------------\nHASH\n")
+    val hash=bucketOfInterest._1
+    println(hash.values.map(_.toString()).mkString(" | "))
+    val euclideanHasher=hasher.asInstanceOf[EuclideanLSHasher]
+    val hyperplanes=euclideanHasher.gaussianVectors(hash.values(hash.values.size-1))
+    val biases=euclideanHasher.b(hash.values(hash.values.size-1))
+    val hyperplanesWithBias=hyperplanes.zip(biases)
+    val hyperplaneStrings=hyperplanesWithBias
+                            .map(
+                                 {
+                                   case (vector,bias) => vector.map(_.toString()).mkString(" | ") + " # " + bias.toString() 
+                                 })
+    val planeParams=hyperplaneStrings.mkString("\n\t")
+    println(s"Hyperplane params: \n\t$planeParams")
+    val pointIndices=bucketOfInterest._2.toArray
+    for (i <- 0 until 5)
+      if (i<bucketOfInterest._2.size)
+      {
+        val p=lookup.lookup(pointIndices(i))
+        println(s"\tPoint $i: ${p.features.toArray.map(_.toString()).mkString(" | ")}")
+      }
+    //FIN DEBUG
+    */
     val bucketDistanceRDD =  bucketRDD.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
     val bucketSizeRDD =  bucketRDD.map({case (h, ids) => ids.size })
     val avBucketDistance = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
-    val avBucketSize = $(numTables).get/bucketSizeRDD.count().toDouble
+    val absoluteAvBucketSize = bucketSizeRDD.sum/dataNumElems
+    val avBucketSize = absoluteAvBucketSize/bucketSizeRDD.count().toDouble
     val bucketCount = bucketRDD.count()
     println("avBucketDistance: "+avBucketDistance)
+    println("absoluteAvBucketSize: "+absoluteAvBucketSize)
     println("avBucketSize: "+avBucketSize)
     println("bucketCount: "+bucketCount)
           
          
           
         
-    val message=s"Training params:\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}"
+    val message=s"Training params:\n\tKL:${hasher.keyLength}\n\tR0:$suggestedRadius\n\tNT:${hasher.numTables}\n\tW:${hasher.w}"
     logDebug(message)
     println(message)
     
-    val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, $(numTablesMultiplier)*hasher.numTables)
+    val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, $(numTablesMultiplier)*hasher.numTables, hasher.w)
     
     //val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
     val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher, suggestedRadius)
@@ -420,7 +451,7 @@ Advanced LSH options:
         new LSHReachabilityAnomalyDetector()
                         .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
                         //MANUAL
-                        .setManualParams(keyLength.get, numTables.get, paramRadius.get)
+                        .setManualParams(keyLength.get, numTables.get, paramRadius.get, 4.0) //TODO Fix splitW
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
                         .fit(trainDataRDD)
       }
