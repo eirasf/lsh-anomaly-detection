@@ -157,7 +157,7 @@ class LSHDualResolutionAnomalyDetector(override val uid: String)
     val newHasher = new EuclideanLSHasher(trainingDataRDD.first()._2.features.size, hasher.keyLength, $(numTablesMultiplier)*hasher.numTables)
     
     //val hashNeighborsRDD = EuclideanLSHasherForAnomaly.getHashNeighbors(trainingDataRDD, newHasher, suggestedRadius) // ((a,b,c), (b,d), (c), (a,h,f,e) (a))
-    val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher, suggestedRadius)
+    val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher)
     println(s"Generated ${hashedDataRDDPrevious.count()} hashes for ${trainingDataRDD.count()} elements.")
     val hashedDataRDD=hashedDataRDDPrevious.groupByKey()
     hashedDataRDD.cache()

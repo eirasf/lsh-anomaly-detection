@@ -134,7 +134,7 @@ object Wplot
                   {
                     
                     val newHasher = new EuclideanLSHasher(trainingData.first()._2.features.size, keyL, numTables, w)
-                    val hashedDataRDD = EuclideanLSHasherForAnomaly.hashData(trainingData, newHasher, radious)
+                    val hashedDataRDD = EuclideanLSHasherForAnomaly.hashData(trainingData, newHasher)
                     val bucketDistanceRDD = hashedDataRDD.groupByKey().filter({case (h, ids) => ids.size>1 }).map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
                     val avBucketDistnce = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
                     //val bucketSizeRDD = hashedDataRDD.map({case (h, id) => (h,1) }).reduceByKey(_+_) //buckets Size

@@ -41,15 +41,16 @@ object GridExplore
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
-    val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
-    //val DATASETS_ROOT="file:///Users/jorgemeira/OneDrive - Instituto Superior de Engenharia do Porto/Doutoramento/datasets/datasets-anomalias/"
+    //val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
+    val DATASETS_ROOT="file:///Users/jorgemeira/OneDrive - Instituto Superior de Engenharia do Porto/Doutoramento/datasets/datasets-anomalias/"
     val NUM_FOLDS=5
     
     //val pw = new PrintWriter(new File("/home/eirasf/Escritorio/reachability/grid-summary-fast-full.txt"))
-    //Array("abalone1-8","abalone9-11","abalone11-29", "arritmia-fix-ohe","german_statlog-ohe", "covtype2vs4",
-    // "kddcup10-http-normal-vs-all","kddcup10-normal-vs-all","kddcup10-smtp-normal-vs-all", "2_banana_clusters", "2_cirucular_clusters",
+    //Array("abalone1-8","abalone9-11","abalone11-29", "arritmia-fix-ohe","german_statlog-ohe", "covtype2vs4", "one_hot_covtype2vs4_sample",
+    // "kddcup10-http-normal-vs-all","kddcup10-normal-vs-all_sample","kddcup10-smtp-normal-vs-all", "one_hot_ids_sample", "2_banana_clusters", "2_cirucular_clusters",
     // "2_point_clouds_with_variance", "3_anisotropic_clusters", "3_point_clouds", "scikit_1_cluster", "scikit_1_cluster_with_variance", "scikit_2_bananas_shape", "scikit_2_clusters" ))
-    for (datasetName <- Array("kddcup/kddcup-smtp-normal-vs-all"))
+    for (datasetName <- Array("abalone1-8","abalone9-11","abalone11-29", "german_statlog", "arritmia-fix", "one_hot_covtype2vs4_sample",
+        "kddcup10-http-normal-vs-all","kddcup10-normal-vs-all_sample","kddcup10-smtp-normal-vs-all", "one_hot_ids_sample"))
     {
       val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, DATASETS_ROOT+datasetName+".libsvm")
       
@@ -60,16 +61,19 @@ object GridExplore
       
 //      for (mf <- Array(10,50,100,500))
 //        for (bs <- Array(5,10,100,1000))
-      for (mf <- Array(1))
-        for (w <- Array(0.01,0.1,1.0,2.0,4.0,8.0)) // experimentar aplicar raiz quadrada de total numero de instancias ou ln ou 1%??
+      for (keyLength <- Array(1,2,4,8,16,32,64,128))
+        for (w <- Array(200)) // experimentar aplicar raiz quadrada de total numero de instancias ou ln ou 1%??
+//        for (w <- Array(16))
         {
           var i=0
           var totalAvBucketSize=0.0
+          var totalAbsoluteAvBucketSize=0.0
           var totalAvBucketDistance = 0.0
           var totalBucketCount = 0.0
           var totalFilteredBucketCount = 0.0
           var totalAUC=0.0
           var totalTime:Long=0
+          var totalstdBucketSize = 0.0
           
           //DEBUG
           //val f=folds(0)
@@ -87,7 +91,7 @@ object GridExplore
            // convertedVecDF_test.coalesce(1).write.format("libsvm").save("testDataRDD_"+i)
             
             
-            println(s">>>> $datasetName - Fold #$i - W:$w - Multiplying factor:$mf")
+            println(s">>>> $datasetName - Fold #$i - W:$w - KeyLength:$keyLength")
             /*try
             {*/
               
@@ -95,8 +99,9 @@ object GridExplore
               val model=new LSHReachabilityAnomalyDetector()
                             //.setMinBucketSize(bs)
                             //.setNumTablesMultiplier(mf)
-                           .setManualParams(4, 50, 1.0, w)
+//                           .setManualParams(8, mf, 1.0, w)
                             //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/reachability/$datasetName-$bs-$mf.html"))
+                            .setKeyLength(Some(keyLength))
                             .fit(trainDataRDD)
                             
               totalTime+=System.currentTimeMillis()-timeStart
@@ -106,6 +111,8 @@ object GridExplore
               totalAvBucketDistance+= model.avBucketDistance
               totalBucketCount+= model.bucketCount
               totalFilteredBucketCount+= model.filteredBucketCount
+              totalAbsoluteAvBucketSize+=model.absoluteAvBucketSize
+              totalstdBucketSize+=model.stdBucketSize
               
             /*}
             catch
@@ -114,8 +121,8 @@ object GridExplore
                 println("ERROR")
             }*/
           }//TODO DEBUG
-          println(s"----------------------------------\n$datasetName - W:$w - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
-          println(s"----------------------------------\n Avg. BucketSize=${totalAvBucketSize/NUM_FOLDS} - Avg. BucketDistance:${totalAvBucketDistance/NUM_FOLDS} - Avg. BucketCount:${totalBucketCount/NUM_FOLDS} - Avg. FilteredBucketCount:${totalFilteredBucketCount/NUM_FOLDS} - \n\n\n\n")
+          println(s"----------------------------------\n$datasetName - W:$w - KeyLength: $keyLength - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
+          println(s"----------------------------------\n Avg. AbsBucketSize=${totalAbsoluteAvBucketSize/NUM_FOLDS} - Avg. BucketSize=${totalAvBucketSize/NUM_FOLDS} - std. BucketSize :${totalstdBucketSize/NUM_FOLDS} - Avg. BucketDistance:${totalAvBucketDistance/NUM_FOLDS} - Avg. BucketCount:${totalBucketCount/NUM_FOLDS} - Avg. FilteredBucketCount:${totalFilteredBucketCount/NUM_FOLDS} - \n\n\n\n")
 //          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS}\n")
 //          pw.flush()
         }
