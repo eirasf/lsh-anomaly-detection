@@ -15,6 +15,7 @@ trait LoggingTEMP
 object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 {
   var KeyLength = 1
+  var NumTables = 1
   override val MIN_TOLERANCE=0.2
   override val MAX_TOLERANCE=4.0
   override val DEFAULT_RADIUS = 1.0
@@ -227,7 +228,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
     
     val numElems=data.count()
     val kLength: Int = EuclideanLSHasherForAnomaly.KeyLength //4
-    val nTables: Int = 50
+    val nTables: Int = EuclideanLSHasherForAnomaly.NumTables //50
     
     val currentData=initialData
     //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.

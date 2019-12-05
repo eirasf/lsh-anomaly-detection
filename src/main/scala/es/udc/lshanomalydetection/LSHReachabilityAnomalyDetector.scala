@@ -104,6 +104,7 @@ class LSHReachabilityAnomalyDetector(override val uid: String)
   def setSplitW(v:Option[Double]):this.type=set(splitW, v)
   setDefault(splitW, Some(4.0))
   def setKeyLength(v:Option[Int]):this.type=set(keyLength, v)
+  def setNumTables(v:Option[Int]):this.type=set(numTables, v)
   def setManualParams(kl:Int, nt:Int, r:Double, w:Double):this.type=
   {
     set(keyLength, Some(kl))
@@ -156,6 +157,7 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     println(s"Tuning hasher... ")
     //DEBUG
     EuclideanLSHasherForAnomaly.KeyLength=$(keyLength).get
+    EuclideanLSHasherForAnomaly.NumTables=$(numTables).get
     //Get a new hasher
     val hasher=
       if ($(keyLength).isEmpty || $(numTables).isEmpty || $(radius).isEmpty || $(splitW).isEmpty)

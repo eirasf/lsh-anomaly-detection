@@ -41,8 +41,8 @@ object GridExplore
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
-    //val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/"
-    val DATASETS_ROOT="file:///Users/jorgemeira/OneDrive - Instituto Superior de Engenharia do Porto/Doutoramento/datasets/datasets-anomalias/"
+    val DATASETS_ROOT="file:///mnt/NTFS/owncloud/Datasets/datasets-anomalias/jorge/"
+    //val DATASETS_ROOT="file:///Users/jorgemeira/OneDrive - Instituto Superior de Engenharia do Porto/Doutoramento/datasets/datasets-anomalias/"
     val NUM_FOLDS=5
     
     //val pw = new PrintWriter(new File("/home/eirasf/Escritorio/reachability/grid-summary-fast-full.txt"))
@@ -61,7 +61,8 @@ object GridExplore
       
 //      for (mf <- Array(10,50,100,500))
 //        for (bs <- Array(5,10,100,1000))
-      for (keyLength <- Array(1,2,4,8,16,32,64,128))
+      for (keyLength <- Array(1,2,4))
+      for (nt <- Array(5,10,50,100,500,1000))
         for (w <- Array(200)) // experimentar aplicar raiz quadrada de total numero de instancias ou ln ou 1%??
 //        for (w <- Array(16))
         {
@@ -91,7 +92,7 @@ object GridExplore
            // convertedVecDF_test.coalesce(1).write.format("libsvm").save("testDataRDD_"+i)
             
             
-            println(s">>>> $datasetName - Fold #$i - W:$w - KeyLength:$keyLength")
+            println(s">>>> $datasetName - Fold #$i - W:$w - KL:$keyLength - NT:$nt")
             /*try
             {*/
               
@@ -102,6 +103,7 @@ object GridExplore
 //                           .setManualParams(8, mf, 1.0, w)
                             //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/reachability/$datasetName-$bs-$mf.html"))
                             .setKeyLength(Some(keyLength))
+                            .setNumTables(Some(nt))
                             .fit(trainDataRDD)
                             
               totalTime+=System.currentTimeMillis()-timeStart
@@ -121,7 +123,7 @@ object GridExplore
                 println("ERROR")
             }*/
           }//TODO DEBUG
-          println(s"----------------------------------\n$datasetName - W:$w - KeyLength: $keyLength - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
+          println(s"----------------------------------\n$datasetName - W:$w - KeyLength: $keyLength - NT: $nt - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS} - \n\n\n\n")
           println(s"----------------------------------\n Avg. AbsBucketSize=${totalAbsoluteAvBucketSize/NUM_FOLDS} - Avg. BucketSize=${totalAvBucketSize/NUM_FOLDS} - std. BucketSize :${totalstdBucketSize/NUM_FOLDS} - Avg. BucketDistance:${totalAvBucketDistance/NUM_FOLDS} - Avg. BucketCount:${totalBucketCount/NUM_FOLDS} - Avg. FilteredBucketCount:${totalFilteredBucketCount/NUM_FOLDS} - \n\n\n\n")
 //          pw.write(s"$datasetName - MinBucketSize:$bs - Multiplying factor:$mf - Avg. AUROC=${totalAUC/NUM_FOLDS} - Time:${totalTime/NUM_FOLDS}\n")
 //          pw.flush()
