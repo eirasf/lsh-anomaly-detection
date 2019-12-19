@@ -55,7 +55,7 @@ trait LSHReachabilityAnomalyDetectorParams extends Params
   final val histogramFilePath= new Param[Option[String]](this, "histogramFilePath", "DEBUG - Path to save the histograms")
 }
 
-class LSHReachabilityAnomalyDetectorModel(private val hashCounts:scala.collection.Map[Hash,Double], private val hasher:Hasher, private val threshold:Int)
+class LSHReachabilityAnomalyDetectorModel(private val hashCounts:List[scala.collection.Map[Hash,Double]], private val hasher:Hasher, private val threshold:Int)
   extends PredictionModel[Vector, LSHReachabilityAnomalyDetectorModel]
   with Serializable
 {
@@ -69,15 +69,22 @@ class LSHReachabilityAnomalyDetectorModel(private val hashCounts:scala.collectio
   
   def predict(features:Vector):Double=
   {
-    if (getEstimator(features)<=threshold)
+    if (getEstimator(features)>threshold)
       return 1.0
     return 0.0
   }
   
-  def getEstimator(features:Vector):Double=
+  def getEstimator(features:Vector):Double=getEstimators(features)(0)
+  def getEstimators(features:Vector):List[Double]=
   {
     val hashes=hasher.getHashes(Vectors.dense(features.toArray), -1, EuclideanLSHasherForAnomaly.DEFAULT_RADIUS)
-    return -hashes.map({case (h,id) => hashCounts.getOrElse(h, 0.0)}).sum
+
+    def elementWiseSumLists(l1:List[Double], l2:List[Double]):List[Double]=
+    {
+      return l1.zip(l2).map({case (x,y) => x+y})
+    }
+
+    return hashes.map({case (h,id) => hashCounts.map({case x => x.getOrElse(h, 0.0)})}).reduce(elementWiseSumLists).map({case x => -x})
   }
   val uid: String = Identifiable.randomUID("LSHReachabilityAnomalyDetectorModel")
   override def copy(extra:ParamMap): LSHReachabilityAnomalyDetectorModel = defaultCopy(extra)
@@ -226,10 +233,10 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     val hashedDataRDDPrevious=EuclideanLSHasherForAnomaly.hashData(trainingDataRDD, newHasher)
     println(s"Generated ${hashedDataRDDPrevious.count()} hashes for ${trainingDataRDD.count()} elements.")
     val hashDataRDD=hashedDataRDDPrevious.groupByKey()
-    val reachabilityRDD=hashDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})})
+    /*val reachabilityRDD=hashDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})})
                                      .reduceByKey({case ((r1,c1,hl1),(r2,c2,hl2)) => (r1+r2,c1+c2,hl1++hl2)})
                                      .flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,1.0/r.toDouble)})})
-                                     .reduceByKey(_+_)
+                                     .reduceByKey(_+_)*/
                                      //.flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,(r.toDouble,1))})})
                                      //.reduceByKey({case ((r1,c1),(r2,c2)) => (r1+r2,c1+c2)})
                                      //.map({case (h,(r,c)) => (h,c.toDouble/r)})
@@ -280,7 +287,25 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     //Retrieve the N=numAnomalies elements with fewer neighbors. They will constitute the predicted anomalies. The largest number of neighbors is the threshold.
     val maxNeighborsForAnomaly = numNeighborsPerPointRDD.map(_._2).takeOrdered(numAnomalies.toInt).last
     */
-    val result = new LSHReachabilityAnomalyDetectorModel(reachabilityRDD.collectAsMap(),
+
+    val estimatorsRDD = hashDataRDD.flatMap({case (hash,l) => l.map({case p => (p, (l.size, 1, List(hash)))})}) //Separate points keeping bucket data
+                                    .reduceByKey({case ((r1,c1,hl1),(r2,c2,hl2)) => (r1+r2,c1+c2,hl1++hl2)}) //Compute per point neighbor and bucket counts and hashes
+                                    .flatMap({case (p,(r,c,hl)) => hl.map({case h => (h,(r.toDouble,1,1.0/r.toDouble))})}) //Separate hashes keeping number of neighbors of contained points, counts and inverse of number of neighbors of contained points
+                                    .reduceByKey({case ((r1,c1,i1),(r2,c2,i2)) => (r1+r2,c1+c2,i1+i2)}) //Compute per hash sum of neighbors of contained points and number of contained points
+                                    .map({case (h,(r,c,i)) => (h, (c.toDouble, r/c.toDouble, c*c.toDouble/r, i.toDouble))}) //Get per hash estimators
+                                    //ESTIMATORS:
+                                    //(1) number of contained points
+                                    //(2) average number of neighbors of contained points
+                                    //(3) ratio between (1) and (2)
+                                    //(4) inverse of number of neighbors of contained points (ORIGINAL)
+
+    val estimatorMaps = List(estimatorsRDD.map({case (h,(e1,e2,e3,e4)) => (h,e1)}).collectAsMap(),
+                              estimatorsRDD.map({case (h,(e1,e2,e3,e4)) => (h,e2)}).collectAsMap(),
+                              estimatorsRDD.map({case (h,(e1,e2,e3,e4)) => (h,e3)}).collectAsMap(),
+                              estimatorsRDD.map({case (h,(e1,e2,e3,e4)) => (h,e4)}).collectAsMap()
+                            )
+
+    val result = new LSHReachabilityAnomalyDetectorModel(estimatorMaps,
                                 newHasher,
                                 0)
     result.avBucketDistance = avBucketDistance
@@ -349,10 +374,10 @@ Advanced LSH options:
     return m.toMap
   }
 
-  def evaluateModel(model:LSHReachabilityAnomalyDetectorModel, testDataRDD:RDD[LabeledPoint]):Double=
+  def evaluateModel(model:LSHReachabilityAnomalyDetectorModel, testDataRDD:RDD[LabeledPoint]):List[Double]=
   {
     val bModel=testDataRDD.sparkContext.broadcast(model)
-    val checkRDD = testDataRDD.map(
+    /*val checkRDD = testDataRDD.map(
                                     {
                                       case lp =>
                                         val m=bModel.value
@@ -397,7 +422,7 @@ Advanced LSH options:
       // AUROC
       val auROCForEstimation = metricsForEstimation.areaUnderROC
       val auROCForPrediction = metricsForPrediction.areaUnderROC
-      
+      */
       
       
 //      println("Grava Ficheiro")
@@ -412,7 +437,7 @@ Advanced LSH options:
             
             
             
-      
+      /*
       println("\tconfMatTuple: "+confMat)
       println("\taccuracy: "+accuracy)
       println("\tprecision: "+precision)
@@ -420,8 +445,34 @@ Advanced LSH options:
       println("\tf1score: "+f1score)
       println("\tArea under ROC (estimation)= " + auROCForEstimation)
       println("\tArea under ROC (prediction)= " + auROCForPrediction)
-      
-      return auROCForEstimation
+      */
+
+
+    val checkRDD = testDataRDD.map(
+                                    {
+                                      case lp =>
+                                        val m=bModel.value
+                                        val f=MLVectors.dense(lp.features.toArray)
+                                        (m.getEstimators(f),lp.label==ANOMALY_VALUE)
+                                    })
+    //ESTIMATOR1
+      val metricsForEstimation = new BinaryClassificationMetrics(checkRDD.map({case (estimators,label) => (estimators(0), if (label) 1.toDouble else 0.toDouble)}))
+      val auROCForEstimation = metricsForEstimation.areaUnderROC
+      println("\tArea under ROC (estimator1)= " + auROCForEstimation)
+    //ESTIMATOR2
+      val metricsForEstimation2 = new BinaryClassificationMetrics(checkRDD.map({case (estimators,label) => (estimators(1), if (label) 1.toDouble else 0.toDouble)}))
+      val auROCForEstimation2 = metricsForEstimation2.areaUnderROC
+      println("\tArea under ROC (estimator2)= " + auROCForEstimation2)
+    //ESTIMATOR3
+      val metricsForEstimation3 = new BinaryClassificationMetrics(checkRDD.map({case (estimators,label) => (estimators(2), if (label) 1.toDouble else 0.toDouble)}))
+      val auROCForEstimation3 = metricsForEstimation3.areaUnderROC
+      println("\tArea under ROC (estimator3)= " + auROCForEstimation3)
+    //ESTIMATOR4
+      val metricsForEstimation4 = new BinaryClassificationMetrics(checkRDD.map({case (estimators,label) => (estimators(3), if (label) 1.toDouble else 0.toDouble)}))
+      val auROCForEstimation4 = metricsForEstimation4.areaUnderROC
+      println("\tArea under ROC (estimator4)= " + auROCForEstimation4)
+
+      return List(auROCForEstimation,auROCForEstimation2,auROCForEstimation3,auROCForEstimation4)
   }
   
   def main(args: Array[String])
