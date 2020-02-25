@@ -307,11 +307,14 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
     val currentHashes = hashData(data, hasher)
     
     
-    val bucketRDD = currentHashes.groupByKey()
-    val filterBucket = bucketRDD.filter({case (h, ids) => ids.size>1 })
+    //val bucketRDD = currentHashes.groupByKey()
+    //val filterBucket = bucketRDD.filter({case (h, ids) => ids.size>1 })
+    //val bucketSizeRDD =  filterBucket.map({case (h, ids) => ids.size })
+    val bucketCountRDD = currentHashes.reduceByKey(_+_)
+    val filterBucket = bucketCountRDD.filter({case (h, c) => c>1 })
     
-    val bucketSizeRDD =  filterBucket.map({case (h, ids) => ids.size })
-    val absoluteAvBucketSize = bucketSizeRDD.mean()
+    
+    val absoluteAvBucketSize = filterBucket.map(_._2).mean()
     val avBucketSize = absoluteAvBucketSize/dataNumElems
 //    println(s"filterBucket: ${filterBucket.count()}")
 //    filterBucket.filter({case (h, ids) => h.values(h.values.size-1)==5 }).collect().foreach({case (h,ids) => println(h.values.map(_.toString()).mkString(" # ") )})
