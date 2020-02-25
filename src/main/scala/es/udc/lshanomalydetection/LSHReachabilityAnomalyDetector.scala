@@ -487,13 +487,14 @@ Advanced LSH options:
     
     val datasetFile=options("dataset").asInstanceOf[String]
     
-    val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
     val paramRadius:Option[Double]=if (options.contains("radius_start")) Some(options("radius_start").asInstanceOf[Double]) else None
     val keyLength:Option[Int]=if (options.contains("key_length")) Some(options("key_length").asInstanceOf[Double].toInt) else None
     val numTables:Option[Int]=if (options.contains("num_tables")) Some(options("num_tables").asInstanceOf[Double].toInt) else None
     //Set up Spark Context
     val sc=sparkContextSingleton.getInstance()
     println(s"Default parallelism: ${sc.defaultParallelism}")
+    //val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
+    val numPartitions=4*sc.defaultParallelism
     
     //Stop annoying INFO messages
     val rootLogger = Logger.getRootLogger()
@@ -525,9 +526,11 @@ Advanced LSH options:
         new LSHReachabilityAnomalyDetector()
                         .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
                         //AUTO TUNING
-                        .setMinBucketSize(50)
-                        .setNumTablesMultiplier(5)
+                        //.setMinBucketSize(50)
+                        //.setNumTablesMultiplier(5)
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
+                        .setKeyLength(Some(4))
+                        .setNumTables(Some(50))
                         .fit(trainDataRDD)
       }
               
