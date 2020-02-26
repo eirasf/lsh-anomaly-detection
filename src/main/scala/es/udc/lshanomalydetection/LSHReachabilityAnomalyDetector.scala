@@ -206,19 +206,19 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
       }
     //FIN DEBUG
     */
-    val bucketDistanceRDD =  filterBucket.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
+    //val bucketDistanceRDD =  filterBucket.map({case (h, ids) => ComputeDistance(ids.toArray, lookup, distance) })
     val bucketSizeRDD =  filterBucket.map({case (h, ids) => ids.size })
-    val avBucketDistance = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
+    //val avBucketDistance = bucketDistanceRDD.sum/bucketDistanceRDD.count().toDouble
     val absoluteAvBucketSize = bucketSizeRDD.sum/bucketSizeRDD.count().toDouble
     val avBucketSize = absoluteAvBucketSize/dataNumElems
-    val stdBucketSize = bucketSizeRDD.stdev()/dataNumElems
-    val bucketCount = bucketRDD.count()
-    val filteredBucketCount = filterBucket.count()
-    println("avBucketDistance: "+avBucketDistance)
+    //val stdBucketSize = bucketSizeRDD.stdev()/dataNumElems
+    //val bucketCount = bucketRDD.count()
+    //val filteredBucketCount = filterBucket.count()
+    //println("avBucketDistance: "+avBucketDistance)
     println("absoluteAvBucketSize: "+absoluteAvBucketSize)
     println("avBucketSize: "+avBucketSize)
-    println("bucketCount: "+bucketCount)
-    println("filteredBucketCount: "+filteredBucketCount)
+    //println("bucketCount: "+bucketCount)
+    //println("filteredBucketCount: "+filteredBucketCount)
           
          
           
@@ -308,12 +308,12 @@ def ComputeDistance(points: Array[Long], lookup: LookupProvider, distance: Dista
     val result = new LSHReachabilityAnomalyDetectorModel(estimatorMaps,
                                 newHasher,
                                 0)
-    result.avBucketDistance = avBucketDistance
+    //result.avBucketDistance = avBucketDistance
     result.avBucketSize = avBucketSize
-    result.bucketCount = bucketCount
-    result.filteredBucketCount = filteredBucketCount
+    //result.bucketCount = bucketCount
+    //result.filteredBucketCount = filteredBucketCount
     result.absoluteAvBucketSize = absoluteAvBucketSize
-    result.stdBucketSize = stdBucketSize
+    //result.stdBucketSize = stdBucketSize
     result
   }
 }
@@ -328,7 +328,7 @@ object LSHReachabilityAnomalyDetector
     println("""Usage: LSHReachabilityAnomalyDetector dataset [options]
     Dataset must be a libsvm file
 Options:
-    -p    Number of partitions for the data RDDs (default: """+DEFAULT_NUM_PARTITIONS+""")
+    -p    Number of partitions for the data RDDs (default: 4*defaultParalelism)
 
 Advanced LSH options:
     -r    Starting radius (default: """+LSHKNNGraphBuilder.DEFAULT_RADIUS_START+""")
@@ -493,14 +493,13 @@ Advanced LSH options:
     //Set up Spark Context
     val sc=sparkContextSingleton.getInstance()
     println(s"Default parallelism: ${sc.defaultParallelism}")
-    //val numPartitions=options("num_partitions").asInstanceOf[Double].toInt
-    val numPartitions=4*sc.defaultParallelism
+    val numPartitions=16*sc.defaultParallelism//options("num_partitions").asInstanceOf[Double].toInt
     
     //Stop annoying INFO messages
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.WARN)
     
-    val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, datasetFile)
+    val dataRDD: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, datasetFile).repartition(numPartitions)
       
     val scaler = new StandardScaler(withMean = true, withStd = true).fit(dataRDD.map(x => x.features))
     val standardDataRDD=dataRDD.map({case p => new LabeledPoint(p.label,scaler.transform(p.features))})
@@ -510,12 +509,13 @@ Advanced LSH options:
     val trainDataRDD=splits(0)
     val testDataRDD=splits(1)
     
+    val startTime=System.currentTimeMillis()
     
     val model=
       if (paramRadius.isDefined && keyLength.isDefined && numTables.isDefined)
       {
         new LSHReachabilityAnomalyDetector()
-                        .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
+                        .setNumPartitions(numPartitions)
                         //MANUAL
                         .setManualParams(keyLength.get, numTables.get, paramRadius.get, 4.0) //TODO Fix splitW
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
@@ -524,16 +524,17 @@ Advanced LSH options:
       else
       {
         new LSHReachabilityAnomalyDetector()
-                        .setNumPartitions(options("num_partitions").asInstanceOf[Double].toInt)
+                        .setNumPartitions(numPartitions)
                         //AUTO TUNING
                         //.setMinBucketSize(50)
                         //.setNumTablesMultiplier(5)
                         //.setHistogramFilePath(Some(s"/home/eirasf/Escritorio/test-5-5.html"))
-                        .setKeyLength(Some(4))
                         .setNumTables(Some(50))
+                        .setKeyLength(Some(4))//TODO Check hardcoded
                         .fit(trainDataRDD)
       }
               
+    println(s"Training time: ${System.currentTimeMillis()-startTime}ms")
     
     val totalAUC=evaluateModel(model,testDataRDD)
     
