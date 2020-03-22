@@ -246,7 +246,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
                      {
                        hasher.w=currentValue
                        val avBucketSize=getAvBucketSize(data, numElems,hasher)
-                       done=avBucketSize>LEFTLIMIT
+                       done=avBucketSize>RIGHTLIMIT
                        println(s"W range updated to [$leftLimit - $currentValue] got a average bucket size of $avBucketSize")
                        if ((avBucketSize>=LEFTLIMIT) && (avBucketSize<=RIGHTLIMIT))
                        {
