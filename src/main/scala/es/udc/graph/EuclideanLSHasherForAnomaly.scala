@@ -23,12 +23,12 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
   {
     Math.log10(n) / Math.log10(2)
   }
-  
+
   def hashData(data: RDD[(Long, LabeledPoint)], hasher: Hasher): RDD[(Hash, Long)] =
   {
     data.flatMap({ case (index, point) => hasher.getHashes(point.features, index, DEFAULT_RADIUS) });
   }
-  
+
   def getHashNeighbors(data:RDD[(Long,LabeledPoint)], hasher:Hasher):RDD[Iterable[Long]]=
   {
     val currentHashes = hashData(data, hasher)
@@ -37,29 +37,29 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 
     return hashNeighbors
   }
-  
+
 //  private def computeBestKeyLength(data: RDD[(Long,LabeledPoint)], dimension:Int, desiredMinComparisons:Int): (EuclideanLSHasher,Double) =
 //  {
 //    val FRACTION=1.0//0.01
 //    val INITIAL_RADIUS=1.0//0.1
 //    val initialData = data//data.sample(false, FRACTION, 56804023).map(_.swap)
-//    
+//
 //    val numElems=data.count()
 //    var initialKLength: Int = Math.ceil(log2(numElems / dimension)).toInt + 1
 //    if (initialKLength<2) initialKLength=2
 //    logDebug(s"DEBUG: numElems=$numElems dimension=$dimension initialKLength=$initialKLength")
-//    val minKLength=if (initialKLength>2) (initialKLength / 2).toInt else 1 
+//    val minKLength=if (initialKLength>2) (initialKLength / 2).toInt else 1
 //    val maxKLength=if (initialKLength>15) (initialKLength * 1.5).toInt else 22
 //    //val hNTables: Int = Math.floor(Math.pow(log2(dimension), 2)).toInt
 //    val hNTables: Int = 10
 //    val desiredMinComparisonsAdjusted=desiredMinComparisons
-//    
-//    
+//
+//
 //    val currentData=initialData
 //    //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.
-//    
+//
 //    logInfo(s"Starting hyperparameter adjusting with:\n\tL:$initialKLength\n\tN:$hNTables\n\tR:$INITIAL_RADIUS\n\tC:$desiredMinComparisonsAdjusted")
-//    
+//
 //    var (leftLimit,rightLimit)=(minKLength,maxKLength)
 //    var radius = INITIAL_RADIUS
 //    var isRadiusAdjusted = false
@@ -71,9 +71,9 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //      val hashNeighborsRDD = getHashNeighbors(data, tmpHasher, radius)
 //      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
 //                                                    .reduceByKey(_ + _)
-//      
+//
 //      val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
-//      
+//
 //      if ((minNumNeighbors>=desiredMinComparisonsAdjusted*MIN_TOLERANCE) && (minNumNeighbors<=desiredMinComparisonsAdjusted*MAX_TOLERANCE))
 //      {
 //        logInfo(s"Found suitable hyperparameters:\n\tL:${tmpHasher.keyLength}\n\tN:${tmpHasher.numTables}\n\tR:$radius")
@@ -124,12 +124,12 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //          return (tmpHasher,radius)
 //        }
 //      }
-//      
+//
 //      logDebug(s"keyLength update to ${tmpHasher.keyLength} [$leftLimit - $rightLimit] with radius $radius because minNumNeighbors was $minNumNeighbors and wanted [${desiredMinComparisonsAdjusted*MIN_TOLERANCE} - ${desiredMinComparisonsAdjusted*MAX_TOLERANCE}]")
 //    }
 //    return (new EuclideanLSHasher(dimension, 1, hNTables), radius)//Dummy
 //  }
-  
+
 //  def getSuitableRadius(data:RDD[(Long,LabeledPoint)], hasher:EuclideanLSHasher, minValue:Double, maxValue:Option[Double], desiredMinCount:Int):Double=
 //  {
 //    val MIN_TOLERANCE_RADIUS=0.1
@@ -149,7 +149,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //                       val hashNeighborsRDD = getHashNeighbors(data, hasher, currentValue)
 //                       val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
 //                                                                      .reduceByKey(_ + _)
-//                        
+//
 //                       val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
 //                       done=minNumNeighbors>desiredMinCount*2
 //                       logDebug(s"Radius range updated to [$leftLimit - $currentValue] got a minNumNeighbors of $minNumNeighbors")
@@ -169,7 +169,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //      val hashNeighborsRDD = getHashNeighbors(data, hasher, radius)
 //      val numNeighborsPerPointRDD = hashNeighborsRDD.flatMap({case l => l.map({case x => (x, l.size-1)})})
 //                                                    .reduceByKey(_ + _)
-//      
+//
 //      val minNumNeighbors=numNeighborsPerPointRDD.map({case (id,rec) => rec }).min()///FRACTION
 //      logDebug(s"Radius update to $radius [$leftLimit - $rightLimit] got a minNumNeighbors of $minNumNeighbors")
 //      if ((minNumNeighbors>=MIN_TOLERANCE_RADIUS*desiredMinCount) && (minNumNeighbors<=MAX_TOLERANCE_RADIUS*desiredMinCount))
@@ -186,12 +186,12 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //          rightLimit=radius
 //          /*
 //          //DEBUG
-//          
+//
 //            val currentHashes = hashData(data, hasher, radius)
 //            var lookup:BroadcastLookupProvider=new BroadcastLookupProvider(data)
 //            //bucketCountBySize is a list of (bucket_size, count) tuples that indicates how many buckets of a given size there are. Count must be >1.
 //            val bucketCountBySize = currentHashes.groupByKey().filter({case (h,indexList) => indexList.size>1}).flatMap({case (h,indexList) => indexList.map(lookup.lookup(_))}).take(100).foreach(println)
-//            System.exit(0) 
+//            System.exit(0)
 //          */
 //        }
 //      if (rightLimit-leftLimit<0.000000001)
@@ -202,9 +202,9 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
 //    }
 //    return 1.0//Dummy
 //  }
-  
+
   def getHasherWForDataset(data: RDD[(Long,LabeledPoint)], dimension:Int):EuclideanLSHasher=getHasherForDataset(data, dimension, -1)._1
-    
+
   override def getHasherForDataset(data: RDD[(Long,LabeledPoint)], dimension:Int, desiredComparisons:Int):(EuclideanLSHasher,Int,Double)=
   {
     //val factorLevel=Math.pow(10,-minusLogOperations)/0.001
@@ -219,25 +219,25 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
     //System.exit(0) //DEBUG
     return (hasher,-1,-1)
   }
-  
+
  private def computeBestW(data: RDD[(Long,LabeledPoint)], dimension:Int): EuclideanLSHasher = {
-    
+
     val LEFTLIMIT = 0.05
     val RIGHTLIMIT = 0.1
     val initialData = data//data.sample(false, FRACTION, 56804023).map(_.swap)
-    
+
     val numElems=data.count()
     val kLength: Int = EuclideanLSHasherForAnomaly.KeyLength //4
     val nTables: Int = EuclideanLSHasherForAnomaly.NumTables //50
-    
+
     val currentData=initialData
     //val currentData=initialData.sample(false, 0.2, 34652912) //20% of the data usually does the job.
-    
+
     logDebug(s"Starting w adjusting with:\n\tL:$kLength\n\tN:$nTables\n\tR:$DEFAULT_RADIUS")
-    
+
     val hasher = new EuclideanLSHasher(dimension, kLength, nTables,1)
     var leftLimit:Int=1 // TODO improve initial w
-    var rightLimit=  
+    var rightLimit=
                    {
                      //Find a w that is too large
                      var done=false
@@ -246,7 +246,7 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
                      {
                        hasher.w=currentValue
                        val avBucketSize=getAvBucketSize(data, numElems,hasher)
-                       done=avBucketSize>RIGHTLIMIT
+                       done=avBucketSize>LEFTLIMIT
                        println(s"W range updated to [$leftLimit - $currentValue] got a average bucket size of $avBucketSize")
                        if ((avBucketSize>=LEFTLIMIT) && (avBucketSize<=RIGHTLIMIT))
                        {
@@ -258,14 +258,14 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
                      }
                      currentValue
                    }
-    
+
     var radius = DEFAULT_RADIUS
     println(s"LeftLimit: $leftLimit - RightLimit: $rightLimit")
     while(true)
     {
       val currentW=Math.floor((leftLimit+rightLimit)/2.0).toInt
       hasher.w = currentW
-      
+
       val avBucketSize=getAvBucketSize(data, numElems, hasher)
       println(s"Testing current w: $currentW yielded average bucket size: $avBucketSize")
       if ((avBucketSize>=LEFTLIMIT) && (avBucketSize<=RIGHTLIMIT))
@@ -294,33 +294,33 @@ object EuclideanLSHasherForAnomaly extends AutotunedHasher with LoggingTEMP
           return hasher
         }
       }
-      
+
       logDebug(s"W update to ${hasher.w} [$leftLimit - $rightLimit] with radius $radius because average bucket size was $avBucketSize and wanted [${LEFTLIMIT} - ${RIGHTLIMIT}]")
       println(s"W update to ${hasher.w} [$leftLimit - $rightLimit] with radius $radius because average bucket size was $avBucketSize and wanted [${LEFTLIMIT} - ${RIGHTLIMIT}]")
     }
     return new EuclideanLSHasher(dimension, 1, nTables)//Dummy
   }
- 
+
   def getAvBucketSize(data:RDD[(Long,LabeledPoint)],dataNumElems:Long, hasher: Hasher):Double=
   {
-    
+
     val currentHashes = hashData(data, hasher)
-    
-    
+
+
     //val bucketRDD = currentHashes.groupByKey()
     //val filterBucket = bucketRDD.filter({case (h, ids) => ids.size>1 })
     //val bucketSizeRDD =  filterBucket.map({case (h, ids) => ids.size })
     val bucketCountRDD = currentHashes.reduceByKey(_+_)
     val filterBucket = bucketCountRDD.filter({case (h, c) => c>1 })
-    
-    
+
+
     val absoluteAvBucketSize = filterBucket.map(_._2).mean()
     val avBucketSize = absoluteAvBucketSize/dataNumElems
 //    println(s"filterBucket: ${filterBucket.count()}")
 //    filterBucket.filter({case (h, ids) => h.values(h.values.size-1)==5 }).collect().foreach({case (h,ids) => println(h.values.map(_.toString()).mkString(" # ") )})
     return avBucketSize
   }
-  
+
   override def getHashes(point:Vector, index:Long, radius:Double):List[(Hash, Long)]=
   {
     return List() //Workaround
