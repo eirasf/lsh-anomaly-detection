@@ -1,7 +1,13 @@
 # LSH Anomaly Detection
 Implementation of a fast anomaly detection algorithm for Big Data using Locality-sensitive Hashing
 
-Compilation requires compiling [KNiNe](https://github.com/eirasf/KNiNe/) and placing the jar in the lib folder. After that:
+Compilation requires compiling [KNiNe](https://github.com/eirasf/KNiNe/) and placing the jar in the lib folder. Please use commit 552bb539420adb26c52f7c1534c2fffa6d23e131
+
+    git clone https://github.com/eirasf/KNiNe.git
+    cd KNiNe
+    sbt clean assembly
+
+Copy 'knine-assembly-0.1.jar' from KNiNe's target folder to the lib folder in lsh-anomaly-detection. After that:
 
     cd <PATH_TO_LSH_ANOMALY_DETECTION>
 
