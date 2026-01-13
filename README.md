@@ -5,6 +5,7 @@ Compilation requires compiling [KNiNe](https://github.com/eirasf/KNiNe/) and pla
 
     git clone https://github.com/eirasf/KNiNe.git
     cd KNiNe
+    git checkout 552bb539420adb26c52f7c1534c2fffa6d23e131
     sbt clean assembly
 
 Copy 'knine-assembly-0.1.jar' from KNiNe's target folder to the lib folder in lsh-anomaly-detection. After that:
